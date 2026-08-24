@@ -1,0 +1,158 @@
+{% extends "base.html" %}
+
+{% block title %}Create account · Secure Share{% endblock %}
+{% block body_class %}auth-page{% endblock %}
+
+{% block body %}
+  <main id="main-content" class="auth-shell">
+    <section class="auth-hero auth-hero--register" aria-labelledby="hero-title">
+      <a class="brand brand--light" href="/" aria-label="Secure Share home">
+        <span class="brand__mark" aria-hidden="true"><span></span></span>
+        <span class="brand__name">Secure Share</span>
+      </a>
+
+      <div class="auth-hero__content">
+        <p class="eyebrow eyebrow--light">Share with confidence</p>
+        <h1 id="hero-title">Your files. Your people. Your permission.</h1>
+        <p class="auth-hero__lead">
+          Create a private workspace where access begins and ends on your terms.
+        </p>
+
+        <div class="access-preview" aria-label="Example private file access">
+          <div class="access-preview__file">
+            <span class="file-symbol" aria-hidden="true"></span>
+            <span><strong>project_report.pdf</strong><small>Private file</small></span>
+            <span class="badge badge--private">Private</span>
+          </div>
+          <div class="access-preview__path" aria-hidden="true"></div>
+          <div class="access-preview__people">
+            <span class="mini-avatar mini-avatar--blue">A</span>
+            <span class="access-preview__arrow" aria-hidden="true">→</span>
+            <span class="mini-avatar mini-avatar--green">B</span>
+            <span><strong>Alice authorized Bob</strong><small>Charlie has no access</small></span>
+          </div>
+        </div>
+      </div>
+
+      <p class="auth-hero__footnote">
+        <span class="status-dot" aria-hidden="true"></span>
+        Access can be revoked at any time
+      </p>
+    </section>
+
+    <section class="auth-panel" aria-labelledby="register-title">
+      <div class="auth-panel__inner auth-panel__inner--wide">
+        <div class="mobile-brand">
+          <a class="brand" href="/" aria-label="Secure Share home">
+            <span class="brand__mark" aria-hidden="true"><span></span></span>
+            <span class="brand__name">Secure Share</span>
+          </a>
+        </div>
+
+        <div class="auth-heading">
+          <p class="eyebrow">Get started</p>
+          <h2 id="register-title">Create account</h2>
+          <p>Set up your Secure Share identity in a few moments.</p>
+        </div>
+
+        <div id="form-alert" class="alert" hidden></div>
+
+        <form
+          id="register-form"
+          class="form-stack"
+          method="post"
+          action="/api/auth/register"
+          novalidate
+        >
+          <div class="form-grid">
+            <div class="field">
+              <label for="username">Username</label>
+              <div class="input-wrap input-wrap--account">
+                <input
+                  id="username"
+                  name="username"
+                  type="text"
+                  autocomplete="username"
+                  autocapitalize="none"
+                  spellcheck="false"
+                  minlength="3"
+                  maxlength="80"
+                  pattern="[A-Za-z0-9_.-]{3,80}"
+                  placeholder="alex.morgan"
+                  aria-describedby="username-hint"
+                  required
+                  autofocus
+                >
+              </div>
+              <p id="username-hint" class="field__hint">3–80 letters, numbers, dots, underscores, or hyphens.</p>
+            </div>
+
+            <div class="field">
+              <label for="email">Email address</label>
+              <div class="input-wrap input-wrap--email">
+                <input
+                  id="email"
+                  name="email"
+                  type="email"
+                  autocomplete="email"
+                  autocapitalize="none"
+                  spellcheck="false"
+                  maxlength="254"
+                  placeholder="alex@example.com"
+                  required
+                >
+              </div>
+            </div>
+          </div>
+
+          <div class="field">
+            <label for="register-password">Password</label>
+            <div class="input-wrap input-wrap--password">
+              <input
+                id="register-password"
+                name="password"
+                type="password"
+                autocomplete="new-password"
+                minlength="8"
+                maxlength="1024"
+                placeholder="At least 8 characters"
+                aria-describedby="password-hint"
+                required
+              >
+            </div>
+            <p id="password-hint" class="field__hint">Use a unique password you do not use elsewhere.</p>
+          </div>
+
+          <div class="field">
+            <label for="confirm-password">Confirm password</label>
+            <div class="input-wrap input-wrap--password">
+              <input
+                id="confirm-password"
+                name="confirm_password"
+                type="password"
+                autocomplete="new-password"
+                minlength="8"
+                maxlength="1024"
+                placeholder="Enter your password again"
+                required
+              >
+            </div>
+          </div>
+
+          <button id="register-submit" class="button button--primary button--block" type="submit">
+            Create secure account
+          </button>
+        </form>
+
+        <p class="auth-switch">
+          Already have an account?
+          <a href="/login">Sign in</a>
+        </p>
+      </div>
+    </section>
+  </main>
+{% endblock %}
+
+{% block scripts %}
+  <script type="module" src="{{ url_for('static', filename='js/register.js') }}"></script>
+{% endblock %}

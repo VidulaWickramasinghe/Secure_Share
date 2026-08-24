@@ -17,8 +17,10 @@ distinct responsibilities:
 ```text
 app/
 ├── models/       SQLAlchemy users, sessions, files, and permissions
-├── routes/       HTTP parsing and REST response handling
+├── routes/       REST endpoints and server-rendered web entry points
 ├── services/     Authentication, file, and permission business rules
+├── templates/    Accessible Flask page templates
+├── static/       Bundled CSS and modular vanilla JavaScript
 ├── utils/        Bearer-token and authorization helpers
 ├── config.py     Environment-backed configuration
 └── extensions.py Shared SQLAlchemy instance
@@ -87,6 +89,59 @@ The API is then available at `http://127.0.0.1:5000`. `python run.py` also
 starts the development server after the database has been initialized. Flask's
 built-in server is for development only; production should use a hardened WSGI
 deployment behind HTTPS.
+
+## Web Interface
+
+Secure Share includes a responsive browser interface built with Flask
+templates, HTML, CSS, and small vanilla JavaScript modules. Start it with the
+same commands used for the API:
+
+```bash
+flask --app run.py init-db
+flask --app run.py run
+```
+
+Open `http://127.0.0.1:5000/`. A signed-out visitor sees the Secure Share
+landing and login screen; an authenticated visitor is taken to
+`/dashboard`. The API remains available under `/api/*`.
+
+To use the interface:
+
+1. Select **Create account**, register a username, email address, and strong
+   password, then sign in.
+2. In the dashboard upload area, choose a file, review its name and size, and
+   select **Upload securely**. Uploaded bytes remain in the private configured
+   storage directory, never under `/static`.
+3. Under **My Files**, select **Manage access** for a file. Enter another
+   registered user's numeric **Sharing ID** from their dashboard and select
+   **Grant access**.
+4. When that user signs in, the file appears under **Shared With Me**. Their
+   **Download** action calls the protected API download endpoint, which checks
+   the current database permission before returning any bytes.
+5. To withdraw access, the owner opens **Manage access** again and selects
+   **Revoke** next to the authorized user. A later download attempt is rejected
+   by the backend with `403 Forbidden`.
+6. **Logout** revokes the current server-side session, removes the browser's
+   authentication state, and returns to the login page.
+
+The browser never treats a visible file card, filename, or file ID as proof of
+access. It renders only the safe records returned by `GET /api/files`, and all
+uploads, downloads, grants, revocations, and deletions go through the existing
+authenticated API. The service and database layers remain the single source
+of truth for authentication, ownership, and authorization.
+
+The existing API intentionally uses opaque bearer tokens rather than a Flask
+login cookie. The web client therefore keeps its token in `sessionStorage` and
+adds it to protected requests as an `Authorization: Bearer ...` header. It
+never puts a token in a URL, persists it in `localStorage`, renders it into a
+page, or stores a password. `sessionStorage` limits persistence to the current
+browser tab, but—unlike an `HttpOnly` cookie—it is readable by same-origin
+JavaScript. For that reason the interface uses only bundled same-origin
+scripts, avoids inline scripts and unsafe HTML insertion, and is served with a
+restrictive Content Security Policy. Production deployments must use HTTPS.
+Logout removes the browser copy and invalidates the corresponding session in
+the database; an expired or otherwise invalid token triggers the same local
+cleanup and sends the user back to login.
 
 ## Environment configuration
 

@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Secure Share — private file transfer with owner-controlled access.">
+    <meta name="theme-color" content="#0b1734">
+    <title>{% block title %}Secure Share{% endblock %}</title>
+    <link rel="icon" href="{{ url_for('static', filename='favicon.svg') }}" type="image/svg+xml">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+  </head>
+  <body data-page="{{ page_name }}" class="{% block body_class %}{% endblock %}">
+    <a class="skip-link" href="#main-content">Skip to main content</a>
+
+    {% block body %}{% endblock %}
+
+    <div
+      id="toast-region"
+      class="toast-region"
+      aria-label="Notifications"
+      aria-live="polite"
+      aria-relevant="additions"
+    ></div>
+
+    {% block scripts %}{% endblock %}
+  </body>
+</html>

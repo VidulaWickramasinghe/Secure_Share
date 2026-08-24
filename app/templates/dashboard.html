@@ -1,0 +1,231 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard · Secure Share{% endblock %}
+{% block body_class %}dashboard-page{% endblock %}
+
+{% block body %}
+  <header class="app-header">
+    <div class="app-header__inner">
+      <a class="brand brand--light" href="/dashboard" aria-label="Secure Share dashboard">
+        <span class="brand__mark" aria-hidden="true"><span></span></span>
+        <span class="brand__name">Secure Share</span>
+      </a>
+
+      <div class="app-header__actions">
+        <div class="header-account" aria-label="Signed-in account">
+          <span class="avatar" aria-hidden="true"></span>
+          <span class="header-account__text">
+            <strong id="account-username">Loading…</strong>
+            <small>Private workspace</small>
+          </span>
+        </div>
+        <button id="logout-button" class="button button--header" type="button">
+          <span class="logout-icon" aria-hidden="true"></span>
+          Log out
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <main id="main-content" class="dashboard-shell">
+    <div id="dashboard-loading" class="dashboard-loading" role="status" aria-live="polite">
+      <span class="spinner" aria-hidden="true"></span>
+      <span>Opening your private workspace…</span>
+    </div>
+
+    <div id="dashboard-content" hidden>
+      <section class="dashboard-intro" aria-labelledby="dashboard-title">
+        <div>
+          <p class="eyebrow">Your private workspace</p>
+          <h1 id="dashboard-title">Files shared on your terms.</h1>
+          <p>Upload privately, grant access deliberately, and revoke it whenever you need.</p>
+        </div>
+        <span class="trust-pill"><span aria-hidden="true"></span>Server-verified access</span>
+      </section>
+
+      <div class="dashboard-grid">
+        <aside class="dashboard-sidebar" aria-label="Account and upload">
+          <section class="card account-card" aria-labelledby="account-title">
+            <div class="card__header card__header--compact">
+              <div>
+                <p class="eyebrow">Signed in as</p>
+                <h2 id="account-title">Your account</h2>
+              </div>
+              <span class="badge badge--private">Private</span>
+            </div>
+            <dl class="account-details">
+              <div>
+                <dt>Username</dt>
+                <dd id="account-username-detail" class="account-username-copy">—</dd>
+              </div>
+              <div>
+                <dt>Email</dt>
+                <dd id="account-email">—</dd>
+              </div>
+              <div>
+                <dt>Sharing ID</dt>
+                <dd><code id="account-sharing-id">—</code></dd>
+              </div>
+            </dl>
+            <p class="account-card__hint">Share your numeric ID with a file owner so they can grant you access.</p>
+          </section>
+
+          <section class="card upload-card" aria-labelledby="upload-title">
+            <div class="card__header card__header--compact">
+              <div>
+                <p class="eyebrow">Add a file</p>
+                <h2 id="upload-title">Secure upload</h2>
+              </div>
+              <span class="upload-lock" aria-hidden="true"></span>
+            </div>
+
+            <form id="upload-form" class="upload-form" data-max-upload-bytes="{{ max_upload_bytes }}">
+              <label class="upload-dropzone" for="file-input">
+                <span class="upload-dropzone__icon" aria-hidden="true"></span>
+                <span class="upload-dropzone__title">Choose a file to upload</span>
+                <span class="upload-dropzone__copy">Stored privately and available only through authorized downloads.</span>
+                <span class="button button--secondary button--small" aria-hidden="true">Browse files</span>
+                <input id="file-input" name="file" type="file" required>
+              </label>
+
+              <div class="selected-file" aria-live="polite">
+                <span class="selected-file__icon" aria-hidden="true"></span>
+                <span class="selected-file__details">
+                  <strong id="selected-file">No file selected</strong>
+                  <small id="selected-file-size">Maximum {{ (max_upload_bytes / 1048576) | round(0, 'floor') | int }} MB</small>
+                </span>
+              </div>
+
+              <div id="upload-progress-container" class="progress-wrap" hidden>
+                <div class="progress-meta">
+                  <span id="upload-status">Uploading securely…</span>
+                  <span aria-hidden="true">Server verified</span>
+                </div>
+                <progress id="upload-progress" max="100" value="0">0%</progress>
+              </div>
+
+              <div id="upload-alert" class="alert" hidden></div>
+
+              <button id="upload-submit" class="button button--primary button--block" type="submit" disabled>
+                Upload securely
+              </button>
+            </form>
+          </section>
+        </aside>
+
+        <div class="file-sections">
+          <section class="card file-section" aria-labelledby="owned-title">
+            <div class="card__header">
+              <div>
+                <span class="section-icon section-icon--owned" aria-hidden="true"></span>
+                <div>
+                  <p class="eyebrow">Owned by you</p>
+                  <h2 id="owned-title">My Files</h2>
+                </div>
+              </div>
+              <span class="section-security">Full access control</span>
+            </div>
+
+            <div id="owned-files" class="file-list" aria-live="polite"></div>
+            <div id="owned-empty" class="empty-state" hidden>
+              <span class="empty-state__icon empty-state__icon--upload" aria-hidden="true"></span>
+              <h3>No files yet</h3>
+              <p>Choose a file in the secure upload panel to create your private collection.</p>
+            </div>
+          </section>
+
+          <section class="card file-section" aria-labelledby="shared-title">
+            <div class="card__header">
+              <div>
+                <span class="section-icon section-icon--shared" aria-hidden="true"></span>
+                <div>
+                  <p class="eyebrow">Authorized for you</p>
+                  <h2 id="shared-title">Files Shared With Me</h2>
+                </div>
+              </div>
+              <span class="section-security">Owner-controlled</span>
+            </div>
+
+            <div id="shared-files" class="file-list" aria-live="polite"></div>
+            <div id="shared-empty" class="empty-state" hidden>
+              <span class="empty-state__icon empty-state__icon--shared" aria-hidden="true"></span>
+              <h3>Nothing shared with you</h3>
+              <p>Files appear here only after their owner explicitly grants you access.</p>
+            </div>
+          </section>
+        </div>
+      </div>
+
+      <footer class="dashboard-footer">
+        <p><span class="footer-lock" aria-hidden="true"></span> Every file request is checked by the Secure Share API.</p>
+        <p>Private file transfer with owner-controlled access.</p>
+      </footer>
+    </div>
+  </main>
+
+  <dialog id="permissions-dialog" class="modal" aria-labelledby="permissions-title">
+    <div class="modal__header">
+      <div>
+        <p class="eyebrow">Owner controls</p>
+        <h2 id="permissions-title">Manage Access</h2>
+        <p id="permissions-file-name" class="modal__filename"></p>
+      </div>
+      <button id="permissions-close" class="icon-button" type="button" aria-label="Close access management dialog">×</button>
+    </div>
+
+    <div class="modal__body">
+      <div class="access-callout">
+        <span aria-hidden="true"></span>
+        <p><strong>Only explicitly authorized users can download this file.</strong>Removing access takes effect on their next request.</p>
+      </div>
+
+      <form id="permission-form" class="permission-form">
+        <div class="field field--grow">
+          <label for="permission-user-id">Add by sharing ID</label>
+          <input
+            id="permission-user-id"
+            name="user_id"
+            type="number"
+            inputmode="numeric"
+            min="1"
+            step="1"
+            placeholder="Enter a registered user's ID"
+            required
+          >
+          <p class="field__hint">Ask the person for the Sharing ID shown on their dashboard.</p>
+        </div>
+        <button id="permission-submit" class="button button--primary" type="submit">Grant Access</button>
+      </form>
+      <div id="permission-alert" class="alert" hidden></div>
+
+      <div class="permission-heading">
+        <h3>Authorized users</h3>
+        <span class="badge badge--private">File-specific</span>
+      </div>
+      <div id="permissions-list" class="permission-list" aria-live="polite"></div>
+      <div id="permissions-empty" class="empty-state empty-state--compact" hidden>
+        <span class="empty-state__icon empty-state__icon--people" aria-hidden="true"></span>
+        <h3>No one else has access</h3>
+        <p>This file is currently available only to you.</p>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog id="delete-dialog" class="modal modal--small" aria-labelledby="delete-title">
+    <div class="modal__body modal__body--centered">
+      <span class="danger-symbol" aria-hidden="true"></span>
+      <p class="eyebrow eyebrow--danger">Permanent action</p>
+      <h2 id="delete-title">Delete this file?</h2>
+      <p><strong id="delete-file-name"></strong></p>
+      <p>This will permanently remove the file and all access permissions.</p>
+    </div>
+    <div class="modal__footer">
+      <button id="delete-cancel" class="button button--secondary" type="button">Cancel</button>
+      <button id="delete-confirm" class="button button--danger" type="button">Delete file</button>
+    </div>
+  </dialog>
+{% endblock %}
+
+{% block scripts %}
+  <script type="module" src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
+{% endblock %}

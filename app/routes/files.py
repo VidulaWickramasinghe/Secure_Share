@@ -10,7 +10,7 @@ from app.services.file_service import (
     delete_file,
     get_accessible_file,
     get_download,
-    list_accessible_files,
+    list_accessible_file_summaries,
     upload_file,
 )
 from app.utils.security import auth_required
@@ -47,8 +47,7 @@ def create_file():
 @files_bp.get("")
 @auth_required
 def list_files():
-    records = list_accessible_files(g.current_user.id)
-    return jsonify({"files": [record.to_dict() for record in records]})
+    return jsonify({"files": list_accessible_file_summaries(g.current_user.id)})
 
 
 @files_bp.get("/<string:file_id>")

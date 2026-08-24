@@ -54,7 +54,9 @@ def create_app(test_config: dict | None = None) -> Flask:
     from app.routes.auth import auth_bp
     from app.routes.files import files_bp
     from app.routes.permissions import permissions_bp
+    from app.routes.web import web_bp
 
+    app.register_blueprint(web_bp)
     app.register_blueprint(auth_bp)
     app.register_blueprint(files_bp)
     app.register_blueprint(permissions_bp)
@@ -64,13 +66,38 @@ def create_app(test_config: dict | None = None) -> Flask:
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
         response.headers.setdefault("X-Frame-Options", "DENY")
         response.headers.setdefault("Referrer-Policy", "no-referrer")
+        response.headers.setdefault("Cross-Origin-Opener-Policy", "same-origin")
+        response.headers.setdefault("Cross-Origin-Resource-Policy", "same-origin")
         response.headers.setdefault(
-            "Content-Security-Policy",
-            "default-src 'none'; frame-ancestors 'none'",
+            "Permissions-Policy", "camera=(), microphone=(), geolocation=()"
         )
         if request.path.startswith("/api/"):
+            response.headers.setdefault(
+                "Content-Security-Policy",
+                "default-src 'none'; frame-ancestors 'none'",
+            )
             response.headers["Cache-Control"] = "no-store"
             response.headers["Pragma"] = "no-cache"
+        else:
+            response.headers.setdefault(
+                "Content-Security-Policy",
+                "; ".join(
+                    (
+                        "default-src 'self'",
+                        "script-src 'self'",
+                        "style-src 'self'",
+                        "img-src 'self' data:",
+                        "font-src 'self'",
+                        "connect-src 'self'",
+                        "object-src 'none'",
+                        "base-uri 'self'",
+                        "form-action 'self'",
+                        "frame-ancestors 'none'",
+                    )
+                ),
+            )
+            if request.endpoint != "static":
+                response.headers["Cache-Control"] = "no-store"
         return response
 
     register_error_handlers(app)

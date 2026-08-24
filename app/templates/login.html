@@ -1,0 +1,122 @@
+{% extends "base.html" %}
+
+{% block title %}Sign in · Secure Share{% endblock %}
+{% block body_class %}auth-page{% endblock %}
+
+{% block body %}
+  <main id="main-content" class="auth-shell">
+    <section class="auth-hero" aria-labelledby="hero-title">
+      <a class="brand brand--light" href="/" aria-label="Secure Share home">
+        <span class="brand__mark" aria-hidden="true"><span></span></span>
+        <span class="brand__name">Secure Share</span>
+      </a>
+
+      <div class="auth-hero__content">
+        <p class="eyebrow eyebrow--light">Confidential by design</p>
+        <h1 id="hero-title">Private file transfer with owner-controlled access.</h1>
+        <p class="auth-hero__lead">
+          Secure Share lets you transfer files privately. You decide exactly who
+          can access each file.
+        </p>
+
+        <ul class="trust-list" aria-label="Secure Share benefits">
+          <li>
+            <span class="trust-list__icon" aria-hidden="true">✓</span>
+            <span><strong>Private by default</strong>Files stay hidden until you share them.</span>
+          </li>
+          <li>
+            <span class="trust-list__icon" aria-hidden="true">✓</span>
+            <span><strong>Precise control</strong>Grant or revoke access for each person.</span>
+          </li>
+          <li>
+            <span class="trust-list__icon" aria-hidden="true">✓</span>
+            <span><strong>Protected delivery</strong>Every download is authorized by the server.</span>
+          </li>
+        </ul>
+      </div>
+
+      <p class="auth-hero__footnote">
+        <span class="status-dot" aria-hidden="true"></span>
+        Owner-controlled access on every file
+      </p>
+    </section>
+
+    <section class="auth-panel" aria-labelledby="login-title">
+      <div class="auth-panel__inner">
+        <div class="mobile-brand">
+          <a class="brand" href="/" aria-label="Secure Share home">
+            <span class="brand__mark" aria-hidden="true"><span></span></span>
+            <span class="brand__name">Secure Share</span>
+          </a>
+        </div>
+
+        <div class="auth-heading">
+          <p class="eyebrow">Welcome back</p>
+          <h2 id="login-title">Sign in</h2>
+          <p>Access your private files and manage who can download them.</p>
+        </div>
+
+        <div id="form-alert" class="alert" hidden></div>
+
+        <form
+          id="login-form"
+          class="form-stack"
+          method="post"
+          action="/api/auth/login"
+          novalidate
+        >
+          <div class="field">
+            <label for="identifier">Username or email</label>
+            <div class="input-wrap input-wrap--account">
+              <input
+                id="identifier"
+                name="identifier"
+                type="text"
+                autocomplete="username"
+                autocapitalize="none"
+                spellcheck="false"
+                maxlength="254"
+                placeholder="you@example.com"
+                required
+                autofocus
+              >
+            </div>
+          </div>
+
+          <div class="field">
+            <label for="password">Password</label>
+            <div class="input-wrap input-wrap--password">
+              <input
+                id="password"
+                name="password"
+                type="password"
+                autocomplete="current-password"
+                maxlength="1024"
+                placeholder="Enter your password"
+                required
+              >
+            </div>
+          </div>
+
+          <button id="login-submit" class="button button--primary button--block" type="submit">
+            Sign in securely
+          </button>
+        </form>
+
+        <p class="auth-switch">
+          New to Secure Share?
+          <a href="/register">Create an account</a>
+        </p>
+
+        <div class="security-note">
+          <span class="security-note__icon" aria-hidden="true"></span>
+          <p><strong>Your session stays private.</strong> Credentials are sent only to the authenticated API and are never shown in the interface.</p>
+        </div>
+      </div>
+    </section>
+  </main>
+{% endblock %}
+
+{% block scripts %}
+  <script type="module" src="{{ url_for('static', filename='js/login.js') }}"></script>
+{% endblock %}

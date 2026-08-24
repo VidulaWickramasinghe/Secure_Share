@@ -10,7 +10,7 @@ from typing import BinaryIO
 from uuid import uuid4
 
 from flask import current_app
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from werkzeug.datastructures import FileStorage
 from werkzeug.utils import secure_filename
 
@@ -281,6 +281,42 @@ def list_accessible_files(user_id: int) -> list[FileRecord]:
         .order_by(FileRecord.created_at.desc(), FileRecord.id)
     )
     return list(db.session.execute(statement).scalars().all())
+
+
+def list_accessible_file_summaries(user_id: int) -> list[dict[str, object]]:
+    """Return safe dashboard metadata derived from backend access records.
+
+    ``access_type`` is presentation data, not an authorization credential. All
+    subsequent operations still execute their normal service-layer checks.
+    """
+
+    records = list_accessible_files(user_id)
+    owned_ids = [record.id for record in records if record.owner_id == user_id]
+    permission_counts: dict[str, int] = {}
+    if owned_ids:
+        count_statement = (
+            select(FilePermission.file_id, func.count(FilePermission.id))
+            .where(FilePermission.file_id.in_(owned_ids))
+            .group_by(FilePermission.file_id)
+        )
+        permission_counts = {
+            file_id: int(count)
+            for file_id, count in db.session.execute(count_statement).all()
+        }
+
+    summaries: list[dict[str, object]] = []
+    for record in records:
+        summary = record.to_dict()
+        is_owner = record.owner_id == user_id
+        summary["access_type"] = "owner" if is_owner else "shared"
+        summary["owner"] = {
+            "id": record.owner.id,
+            "username": record.owner.username,
+        }
+        if is_owner:
+            summary["authorized_user_count"] = permission_counts.get(record.id, 0)
+        summaries.append(summary)
+    return summaries
 
 
 def _open_stored_file(record: FileRecord) -> BinaryIO:
