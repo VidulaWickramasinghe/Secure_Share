@@ -1,6 +1,6 @@
 Flask>=3.1,<4
 Flask-Limiter[redis]>=4.1.1,<5
-Flask-Migrate>=4.0,<5
+Flask-Migrate>=4.1.0,<5
 Flask-SQLAlchemy>=3.1,<4
 SQLAlchemy>=2.0,<3
 Werkzeug>=3.1,<4
