@@ -1,7 +1,6 @@
 import {
   getCurrentUser,
   logout,
-  requireAuthentication,
   setAuthNotice,
 } from "./auth.js";
 import {
@@ -10,6 +9,7 @@ import {
   getFilePermissions,
   grantFilePermission,
   listFiles,
+  requestEmailVerification,
   revokeFilePermission,
   uploadFile,
 } from "./api.js";
@@ -40,6 +40,9 @@ function collectElements() {
     "account-username",
     "account-username-detail",
     "account-email",
+    "email-verification-status",
+    "email-verification-banner",
+    "resend-verification-button",
     "account-sharing-id",
     "logout-button",
     "upload-form",
@@ -134,6 +137,13 @@ function displayAccount(user) {
   }
   if (elements["account-email"]) {
     elements["account-email"].textContent = user.email || "";
+  }
+  const isVerified = user.email_verified === true;
+  if (elements["email-verification-status"]) {
+    elements["email-verification-status"].hidden = isVerified;
+  }
+  if (elements["email-verification-banner"]) {
+    elements["email-verification-banner"].hidden = isVerified;
   }
   if (elements["account-sharing-id"]) {
     elements["account-sharing-id"].textContent = String(user.id ?? "—");
@@ -680,16 +690,47 @@ async function handleLogout() {
   try {
     await logout();
     setAuthNotice("You have signed out successfully.");
-  } catch (_error) {
-    // logout() always clears the browser token, even if the network request
-    // fails. Be explicit about the narrower guarantee on the next page.
-    setAuthNotice("You have been signed out from this browser.");
+  } catch (error) {
+    showToast(
+      errorMessage(
+        error,
+        "Secure logout could not reach the server. Please try again.",
+      ),
+      "error",
+    );
+    setButtonBusy(elements["logout-button"], false);
+    return;
   }
   window.location.replace("/login");
 }
 
+async function handleResendVerification() {
+  const button = elements["resend-verification-button"];
+  setButtonBusy(button, true, "Sending…");
+  try {
+    const payload = await requestEmailVerification();
+    showToast(
+      payload?.message || "A new verification email has been requested.",
+      "success",
+    );
+  } catch (error) {
+    if (error?.status !== 401) {
+      showToast(
+        errorMessage(error, "Unable to request a verification email."),
+        "error",
+      );
+    }
+  } finally {
+    setButtonBusy(button, false);
+  }
+}
+
 function bindEvents() {
   elements["logout-button"]?.addEventListener("click", () => void handleLogout());
+  elements["resend-verification-button"]?.addEventListener(
+    "click",
+    () => void handleResendVerification(),
+  );
   elements["file-input"]?.addEventListener("change", () => {
     clearFormAlert(elements["upload-alert"]);
     updateSelectedUpload();
@@ -720,10 +761,6 @@ async function initializeDashboard() {
   if (!elements["dashboard-content"]) {
     return;
   }
-  if (!requireAuthentication()) {
-    return;
-  }
-
   bindEvents();
   updateSelectedUpload();
   setDashboardLoading(true);

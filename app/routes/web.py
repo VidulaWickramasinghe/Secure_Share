@@ -29,6 +29,27 @@ def register():
     return render_template("register.html", page_name="register")
 
 
+@web_bp.get("/verify-email")
+def verify_email():
+    """Render the email-verification result surface."""
+
+    return render_template("verify_email.html", page_name="verify-email")
+
+
+@web_bp.get("/forgot-password")
+def forgot_password():
+    """Render the account-enumeration-safe recovery request form."""
+
+    return render_template("forgot_password.html", page_name="forgot-password")
+
+
+@web_bp.get("/reset-password")
+def reset_password():
+    """Render the single-use password-reset form."""
+
+    return render_template("reset_password.html", page_name="reset-password")
+
+
 @web_bp.get("/dashboard")
 def dashboard():
     """Render the application shell; its data always comes from the API."""

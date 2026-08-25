@@ -5,6 +5,12 @@ from __future__ import annotations
 from flask import Blueprint, g, jsonify, request, send_file
 from werkzeug.exceptions import RequestEntityTooLarge
 
+from app.rate_limits import (
+    download_peer_rate_limited,
+    download_rate_limited,
+    upload_peer_rate_limited,
+    upload_rate_limited,
+)
 from app.services.file_service import (
     FileServiceError,
     delete_file,
@@ -30,7 +36,9 @@ def handle_request_too_large(_error: RequestEntityTooLarge):
 
 
 @files_bp.post("")
+@upload_peer_rate_limited
 @auth_required
+@upload_rate_limited
 def create_file():
     record = upload_file(request.files.get("file"), g.current_user)
     return (
@@ -58,7 +66,9 @@ def get_file_metadata(file_id: str):
 
 
 @files_bp.get("/<string:file_id>/download")
+@download_peer_rate_limited
 @auth_required
+@download_rate_limited
 def download_file(file_id: str):
     record, stored_file = get_download(file_id, g.current_user.id)
     try:

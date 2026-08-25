@@ -1,6 +1,5 @@
 import {
   getCurrentUser,
-  isAuthenticated,
   setAuthNotice,
 } from "./auth.js";
 import { registerAccount } from "./api.js";
@@ -12,7 +11,7 @@ import {
 } from "./common.js";
 
 const USERNAME_PATTERN = /^[a-z0-9_.-]{3,80}$/i;
-const MINIMUM_PASSWORD_LENGTH = 8;
+const MINIMUM_PASSWORD_LENGTH = 15;
 const MAXIMUM_PASSWORD_LENGTH = 1024;
 
 async function initializeRegistration() {
@@ -28,22 +27,20 @@ async function initializeRegistration() {
   const submitButton = form.querySelector("#register-submit");
   const formAlert = document.querySelector("#form-alert");
 
-  if (isAuthenticated()) {
-    setButtonBusy(submitButton, true, "Checking session…");
-    try {
-      await getCurrentUser();
-      window.location.replace("/dashboard");
-      return;
-    } catch (error) {
-      if (isAuthenticated()) {
-        setFormAlert(
-          formAlert,
-          errorMessage(error, "Unable to verify your session."),
-        );
-      }
-    } finally {
-      setButtonBusy(submitButton, false);
+  setButtonBusy(submitButton, true, "Checking session…");
+  try {
+    await getCurrentUser({ redirectOnUnauthorized: false });
+    window.location.replace("/dashboard");
+    return;
+  } catch (error) {
+    if (error?.status !== 401) {
+      setFormAlert(
+        formAlert,
+        errorMessage(error, "Unable to verify your session."),
+      );
     }
+  } finally {
+    setButtonBusy(submitButton, false);
   }
 
   form.addEventListener("submit", async (event) => {
@@ -73,7 +70,7 @@ async function initializeRegistration() {
       return;
     }
     if (password.length < MINIMUM_PASSWORD_LENGTH) {
-      setFormAlert(formAlert, "Password must be at least 8 characters.");
+      setFormAlert(formAlert, "Password must be at least 15 characters.");
       passwordInput.focus();
       return;
     }
@@ -91,7 +88,9 @@ async function initializeRegistration() {
     setButtonBusy(submitButton, true, "Creating account…");
     try {
       await registerAccount({ username, email, password });
-      setAuthNotice("Account created successfully. Sign in to continue.");
+      setAuthNotice(
+        "Account created. Check your email for a verification link, then sign in.",
+      );
       window.location.replace("/login");
     } catch (error) {
       setFormAlert(

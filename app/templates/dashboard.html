@@ -34,6 +34,15 @@
     </div>
 
     <div id="dashboard-content" hidden>
+      <section id="email-verification-banner" class="verification-banner" aria-labelledby="verification-banner-title" hidden>
+        <div>
+          <p class="eyebrow">Verify your identity</p>
+          <h2 id="verification-banner-title">Verify your email to receive shared files</h2>
+          <p>You can upload your own files now. Verification is required before another owner can grant you access.</p>
+        </div>
+        <button id="resend-verification-button" class="button button--secondary" type="button">Resend verification email</button>
+      </section>
+
       <section class="dashboard-intro" aria-labelledby="dashboard-title">
         <div>
           <p class="eyebrow">Your private workspace</p>
@@ -60,7 +69,7 @@
               </div>
               <div>
                 <dt>Email</dt>
-                <dd id="account-email">—</dd>
+                <dd><span id="account-email">—</span> <span id="email-verification-status" class="badge badge--warning" hidden>Unverified</span></dd>
               </div>
               <div>
                 <dt>Sharing ID</dt>

@@ -27,12 +27,28 @@ def app(tmp_path: Path):
     application = create_app(
         {
             "TESTING": True,
+            "APP_ENV": "test",
             "SECRET_KEY": "test-only-secret-key-with-sufficient-entropy",
+            "ACCOUNT_TOKEN_PEPPER": (
+                "test-only-account-token-pepper-with-sufficient-entropy"
+            ),
+            "RATE_LIMIT_KEY_SECRET": (
+                "test-only-rate-limit-key-with-sufficient-entropy"
+            ),
+            "RATELIMIT_STORAGE_URI": "memory://",
             "SQLALCHEMY_DATABASE_URI": f"sqlite:///{tmp_path / 'test.db'}",
             "SQLALCHEMY_TRACK_MODIFICATIONS": False,
             "UPLOAD_FOLDER": str(upload_folder),
             "MAX_CONTENT_LENGTH": 1024 * 1024,
             "SESSION_LIFETIME_SECONDS": 3600,
+            "BROWSER_COOKIE_SECURE": False,
+            "EMAIL_VERIFICATION_TOKEN_LIFETIME_SECONDS": 3600,
+            "PASSWORD_RESET_TOKEN_LIFETIME_SECONDS": 1800,
+            "PASSWORD_RESET_MINIMUM_RESPONSE_SECONDS": 0,
+            "PUBLIC_BASE_URL": "http://localhost",
+            "MAIL_BACKEND": "memory",
+            "MAIL_FROM_ADDRESS": "no-reply@example.test",
+            "SECURITY_EMAIL_INLINE_DELIVERY": True,
         }
     )
 
@@ -57,6 +73,8 @@ def register_user(client) -> Callable[..., dict[str, Any]]:
         username: str,
         email: str | None = None,
         password: str = "CorrectHorseBatteryStaple!42",
+        *,
+        verified: bool = True,
     ) -> dict[str, Any]:
         response = client.post(
             "/api/auth/register",
@@ -69,6 +87,16 @@ def register_user(client) -> Callable[..., dict[str, Any]]:
         assert response.status_code == 201, response.get_json()
         body = response.get_json()
         assert isinstance(body, dict) and isinstance(body.get("user"), dict)
+        if verified:
+            from app.models import User
+            from app.models.user import utc_now
+
+            with client.application.app_context():
+                user = db.session.get(User, body["user"]["id"])
+                assert user is not None
+                user.email_verified_at = utc_now()
+                db.session.commit()
+            body["user"]["email_verified"] = True
         return body["user"]
 
     return _register
@@ -88,6 +116,31 @@ def login_user(client) -> Callable[..., str]:
         body = response.get_json()
         assert isinstance(body, dict) and isinstance(body.get("token"), str)
         return body["token"]
+
+    return _login
+
+
+@pytest.fixture()
+def browser_login_user(client) -> Callable[..., dict[str, Any]]:
+    def _login(
+        identifier: str,
+        password: str = "CorrectHorseBatteryStaple!42",
+    ) -> dict[str, Any]:
+        response = client.post(
+            "/api/auth/browser-login",
+            headers={"Origin": "http://localhost"},
+            json={"identifier": identifier, "password": password},
+        )
+        assert response.status_code == 200, response.get_json()
+        body = response.get_json()
+        csrf_cookie = client.get_cookie("secure_share_csrf")
+        assert isinstance(body, dict) and isinstance(body.get("user"), dict)
+        assert csrf_cookie is not None
+        return {
+            "user": body["user"],
+            "csrf_token": csrf_cookie.value,
+            "response": response,
+        }
 
     return _login
 

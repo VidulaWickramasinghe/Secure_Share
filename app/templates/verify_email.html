@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+
+{% block title %}Verify email · Secure Share{% endblock %}
+{% block body_class %}auth-page{% endblock %}
+
+{% block body %}
+  <main id="main-content" class="auth-shell">
+    <section class="auth-hero" aria-labelledby="verify-hero-title">
+      <a class="brand brand--light" href="/" aria-label="Secure Share home">
+        <span class="brand__mark" aria-hidden="true"><span></span></span>
+        <span class="brand__name">Secure Share</span>
+      </a>
+      <div class="auth-hero__content">
+        <p class="eyebrow eyebrow--light">Recipient identity</p>
+        <h1 id="verify-hero-title">Verify the address that receives your shares.</h1>
+        <p class="auth-hero__lead">Email verification confirms control of your address. File downloads still require a signed-in account and explicit owner permission.</p>
+      </div>
+      <p class="auth-hero__footnote"><span class="status-dot" aria-hidden="true"></span>Verification does not bypass file authorization</p>
+    </section>
+
+    <section class="auth-panel" aria-labelledby="verify-title">
+      <div class="auth-panel__inner">
+        <div class="mobile-brand">
+          <a class="brand" href="/" aria-label="Secure Share home">
+            <span class="brand__mark" aria-hidden="true"><span></span></span>
+            <span class="brand__name">Secure Share</span>
+          </a>
+        </div>
+        <div class="auth-heading">
+          <p class="eyebrow">Email verification</p>
+          <h2 id="verify-title">Checking your secure link</h2>
+          <p id="verify-description">Please wait while Secure Share verifies this single-use link.</p>
+        </div>
+        <div id="form-alert" class="alert alert--info" role="status">Verifying your email…</div>
+        <div class="form-stack">
+          <a id="verify-continue" class="button button--primary button--block button--link" href="/login" hidden>Continue to sign in</a>
+          <a id="verify-dashboard" class="button button--secondary button--block button--link" href="/dashboard" hidden>Return to dashboard</a>
+        </div>
+      </div>
+    </section>
+  </main>
+{% endblock %}
+
+{% block scripts %}
+  <script type="module" src="{{ url_for('static', filename='js/verify_email.js') }}"></script>
+{% endblock %}

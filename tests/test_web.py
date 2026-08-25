@@ -17,6 +17,9 @@ from app.models.file import FileRecord
         ("/", "Private file transfer with owner-controlled access.", "login.js"),
         ("/login", "Sign in", "login.js"),
         ("/register", "Create account", "register.js"),
+        ("/forgot-password", "Request a reset link", "forgot_password.js"),
+        ("/reset-password", "Choose a new password", "reset_password.js"),
+        ("/verify-email", "Checking your secure link", "verify_email.js"),
         ("/dashboard", "My Files", "dashboard.js"),
     ),
 )
@@ -36,7 +39,15 @@ def test_web_pages_render_the_expected_application_shell(
 
 def test_rendered_pages_use_only_resolvable_external_assets(client):
     assets: set[str] = set()
-    for path in ("/", "/login", "/register", "/dashboard"):
+    for path in (
+        "/",
+        "/login",
+        "/register",
+        "/forgot-password",
+        "/reset-password",
+        "/verify-email",
+        "/dashboard",
+    ):
         html = client.get(path).get_data(as_text=True)
         assets.update(re.findall(r'(?:href|src)="(/static/[^"?#]+)', html))
 
@@ -56,7 +67,7 @@ def test_rendered_pages_use_only_resolvable_external_assets(client):
 def test_password_forms_have_safe_post_fallbacks(client):
     """A blocked script must never make a password fall back to a GET URL."""
 
-    for path in ("/", "/login", "/register"):
+    for path in ("/", "/login", "/register", "/reset-password"):
         html = client.get(path).get_data(as_text=True)
         forms = re.findall(r"<form\b[^>]*>[\s\S]*?</form>", html, re.IGNORECASE)
         password_forms = [
@@ -72,7 +83,7 @@ def test_password_forms_have_safe_post_fallbacks(client):
                 r'\bmethod\s*=\s*["\']post["\']', opening_tag, re.IGNORECASE
             )
             assert re.search(
-                r'\baction\s*=\s*["\']/api/auth/(?:login|register)["\']',
+                r'\baction\s*=\s*["\']/api/auth/(?:browser-login|register|password-reset/confirm)["\']',
                 opening_tag,
                 re.IGNORECASE,
             )
@@ -108,7 +119,7 @@ def test_dashboard_shell_does_not_embed_account_file_or_token_data(
         assert private_value not in html
 
     # Password inputs must never be pre-populated by the server.
-    for path in ("/", "/login", "/register"):
+    for path in ("/", "/login", "/register", "/reset-password"):
         page = client.get(path).get_data(as_text=True)
         password_inputs = re.findall(
             r'<input\b[^>]*\btype=["\']password["\'][^>]*>',
@@ -154,7 +165,15 @@ def test_web_and_api_responses_have_distinct_restrictive_csp(client):
         "frame-ancestors 'none'",
     }
 
-    for path in ("/", "/login", "/register", "/dashboard"):
+    for path in (
+        "/",
+        "/login",
+        "/register",
+        "/forgot-password",
+        "/reset-password",
+        "/verify-email",
+        "/dashboard",
+    ):
         response = client.get(path)
         csp = response.headers["Content-Security-Policy"]
         directives = {item.strip() for item in csp.split(";") if item.strip()}
@@ -175,7 +194,7 @@ def test_web_and_api_responses_have_distinct_restrictive_csp(client):
     assert "no-store" in api_response.headers["Cache-Control"]
 
 
-def test_frontend_auth_helper_uses_header_only_session_tokens(client):
+def test_frontend_uses_cookie_session_and_separate_csrf_token(client):
     auth_response = client.get("/static/js/auth.js")
     api_response = client.get("/static/js/api.js")
 
@@ -185,18 +204,57 @@ def test_frontend_auth_helper_uses_header_only_session_tokens(client):
     combined_source = source + "\n" + api_response.get_data(as_text=True)
 
     assert "sessionStorage" in source
-    assert "secure-share.auth-token" in source
+    assert "secure-share.auth-notice" in source
     assert "authorizedFetch" in combined_source
-    assert re.search(r"Authorization[\s\S]{0,240}Bearer", combined_source)
+    assert "/api/auth/browser-login" in source
+    assert "document.cookie" in source
+    assert "X-CSRF-Token" in combined_source
+    assert "X-Secure-Share-CSRF-Restore" in combined_source
+    assert "withCredentials = true" in combined_source
+    assert 'credentials: "same-origin"' in combined_source
     assert re.search(r"status\s*===\s*401", combined_source)
     assert "removeItem" in source
     assert "/login" in source
 
-    # A bearer credential must not become durable browser state or URL data.
+    # JavaScript may store notices and read the non-credential CSRF cookie, but
+    # it must never store or attach the HttpOnly session credential.
+    assert "LEGACY_TOKEN_STORAGE_KEY" in source
+    assert "removeSessionValue(LEGACY_TOKEN_STORAGE_KEY)" in source
+    assert "storeAuthToken" not in combined_source
+    assert "Authorization" not in combined_source
+    assert "Bearer" not in combined_source
+    assert "getAuthToken" not in combined_source
     assert re.search(r"\blocalStorage\b", combined_source) is None
     assert "URLSearchParams" not in combined_source
     assert re.search(r"[?&](?:access_)?token=", combined_source, re.IGNORECASE) is None
     assert re.search(r"console\.(?:log|debug)\s*\(", combined_source) is None
+
+
+def test_account_action_frontend_keeps_tokens_out_of_urls_and_storage(client):
+    reset_source = client.get("/static/js/reset_password.js").get_data(as_text=True)
+    verify_source = client.get("/static/js/verify_email.js").get_data(as_text=True)
+    api_source = client.get("/static/js/api.js").get_data(as_text=True)
+    action_source = f"{reset_source}\n{verify_source}"
+
+    assert 'window.location.hash.slice(1)' in action_source
+    assert "window.history.replaceState" in action_source
+    assert 'credentials: "omit"' in api_source
+    assert "/api/auth/email-verification/confirm" in api_source
+    assert "/api/auth/password-reset/request" in api_source
+    assert "/api/auth/password-reset/confirm" in api_source
+    assert "localStorage" not in action_source
+    assert "sessionStorage" not in action_source
+    assert re.search(r"[?&](?:access_)?token=", action_source, re.IGNORECASE) is None
+    assert re.search(r"console\.(?:log|debug)\s*\(", action_source) is None
+
+
+def test_dashboard_includes_email_verification_status_without_private_data(client):
+    html = client.get("/dashboard").get_data(as_text=True)
+
+    assert 'id="email-verification-banner"' in html
+    assert 'id="resend-verification-button"' in html
+    assert 'id="email-verification-status"' in html
+    assert "#token=" not in html
 
 
 def test_file_list_presentation_fields_are_safe_and_permission_derived(

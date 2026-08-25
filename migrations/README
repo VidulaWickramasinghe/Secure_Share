@@ -1,0 +1,12 @@
+Secure Share database migrations
+================================
+
+Run migrations through the application so environment-backed database
+configuration and SQLite foreign-key safeguards are loaded:
+
+    flask --app run.py init-db
+
+The retained ``init-db`` command upgrades a versioned database, initializes an
+empty database, or safely adopts the exact schema that predates Alembic. Use
+``flask --app run.py db current`` and ``flask --app run.py db history`` for
+diagnostics. Never stamp an unknown schema manually.

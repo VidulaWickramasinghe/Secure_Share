@@ -12,7 +12,9 @@ from werkzeug.security import check_password_hash, generate_password_hash
 from app.extensions import db
 
 if TYPE_CHECKING:
+    from app.models.account_action_token import AccountActionToken
     from app.models.auth_session import AuthSession
+    from app.models.security_email_job import SecurityEmailJob
 
 
 def utc_now() -> datetime:
@@ -45,11 +47,27 @@ class User(db.Model):
         String(254), unique=True, index=True, nullable=False
     )
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    email_verified_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    password_changed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, nullable=False
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utc_now, nullable=False, index=True
     )
 
     auth_sessions: Mapped[list["AuthSession"]] = relationship(
+        back_populates="user",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+    account_action_tokens: Mapped[list["AccountActionToken"]] = relationship(
+        back_populates="user",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+    security_email_jobs: Mapped[list["SecurityEmailJob"]] = relationship(
         back_populates="user",
         cascade="all, delete-orphan",
         passive_deletes=True,
@@ -76,6 +94,7 @@ class User(db.Model):
             "id": self.id,
             "username": self.username,
             "email": self.email,
+            "email_verified": self.email_verified_at is not None,
             "created_at": serialize_timestamp(self.created_at),
         }
 

@@ -18,7 +18,7 @@ class PermissionValidationError(FileServiceError):
 
 class PermissionTargetNotFoundError(FileServiceError):
     status_code = 404
-    message = "User not found."
+    message = "Recipient not found or unavailable."
 
 
 class PermissionAlreadyExistsError(FileServiceError):
@@ -69,7 +69,7 @@ def authorize_user(
         raise OwnerPermissionError()
 
     target_user = db.session.get(User, user_id)
-    if target_user is None:
+    if target_user is None or target_user.email_verified_at is None:
         raise PermissionTargetNotFoundError()
 
     existing = db.session.execute(

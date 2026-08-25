@@ -1,13 +1,8 @@
-/**
- * Browser authentication for Secure Share.
- *
- * The API deliberately uses opaque bearer tokens. They are kept in
- * sessionStorage so they disappear when the tab is closed, and they are never
- * placed in URLs, page content, or logs.
- */
+/** Browser authentication backed by an HttpOnly server-side session cookie. */
 
-const TOKEN_STORAGE_KEY = "secure-share.auth-token";
 const NOTICE_STORAGE_KEY = "secure-share.auth-notice";
+const LEGACY_TOKEN_STORAGE_KEY = "secure-share.auth-token";
+const DEFAULT_CSRF_COOKIE_NAME = "secure_share_csrf";
 export const AUTH_NOTICE_EVENT = "secure-share:auth-notice";
 
 export class AuthenticationError extends Error {
@@ -26,24 +21,16 @@ function readSessionValue(key) {
   }
 }
 
-function writeSessionValue(key, value) {
-  try {
-    window.sessionStorage.setItem(key, value);
-  } catch (_error) {
-    throw new AuthenticationError(
-      "Authentication storage is unavailable in this browser.",
-      500,
-    );
-  }
-}
-
 function removeSessionValue(key) {
   try {
     window.sessionStorage.removeItem(key);
   } catch (_error) {
-    // There is nothing more the client can safely do if storage is blocked.
+    // Notices are best-effort and never contain authentication credentials.
   }
 }
+
+// Remove credentials left by pre-cookie releases without ever reading them.
+removeSessionValue(LEGACY_TOKEN_STORAGE_KEY);
 
 async function responseError(response, fallbackMessage) {
   let message = fallbackMessage;
@@ -67,27 +54,34 @@ function sameOriginUrl(input) {
   return url;
 }
 
-export function getAuthToken() {
-  const token = readSessionValue(TOKEN_STORAGE_KEY);
-  return typeof token === "string" && token.length > 0 ? token : null;
+function csrfCookieName() {
+  return (
+    document
+      .querySelector('meta[name="secure-share-csrf-cookie"]')
+      ?.getAttribute("content") || DEFAULT_CSRF_COOKIE_NAME
+  );
 }
 
-function storeAuthToken(token) {
-  if (typeof token !== "string" || !token.trim()) {
-    throw new AuthenticationError(
-      "The server returned an invalid authentication response.",
-      500,
-    );
+function readCookie(name) {
+  const encodedName = `${encodeURIComponent(name)}=`;
+  for (const item of document.cookie.split(";")) {
+    const candidate = item.trim();
+    if (!candidate.startsWith(encodedName)) {
+      continue;
+    }
+    const value = candidate.slice(encodedName.length);
+    try {
+      return decodeURIComponent(value);
+    } catch (_error) {
+      return null;
+    }
   }
-  writeSessionValue(TOKEN_STORAGE_KEY, token);
+  return null;
 }
 
-export function clearAuthentication() {
-  removeSessionValue(TOKEN_STORAGE_KEY);
-}
-
-export function isAuthenticated() {
-  return getAuthToken() !== null;
+export function getCsrfToken() {
+  const token = readCookie(csrfCookieName());
+  return typeof token === "string" && token.length > 0 ? token : null;
 }
 
 export function setAuthNotice(message) {
@@ -96,8 +90,7 @@ export function setAuthNotice(message) {
       window.sessionStorage.setItem(NOTICE_STORAGE_KEY, message.trim());
       return true;
     } catch (_error) {
-      // Notices are best-effort. A blocked storage API must never prevent a
-      // logout or expired-session redirect from completing.
+      // A blocked storage API must never prevent logout or navigation.
     }
   }
   return false;
@@ -109,15 +102,10 @@ export function consumeAuthNotice() {
   return notice;
 }
 
-/**
- * Clear a rejected session and move protected pages back to the login screen.
- */
 export function handleUnauthorized(
   message = "Your session has expired. Please sign in again.",
 ) {
-  clearAuthentication();
   setAuthNotice(message);
-
   window.dispatchEvent(
     new CustomEvent(AUTH_NOTICE_EVENT, { detail: { message } }),
   );
@@ -130,28 +118,69 @@ export function handleUnauthorized(
   }
 }
 
-export function requireAuthentication() {
-  if (isAuthenticated()) {
-    return true;
+export async function refreshCsrfToken({ redirectOnUnauthorized = true } = {}) {
+  const response = await window.fetch("/api/auth/csrf", {
+    method: "GET",
+    headers: { "X-Secure-Share-CSRF-Restore": "1" },
+    cache: "no-store",
+    credentials: "same-origin",
+  });
+  if (response.status === 401) {
+    const error = await responseError(response, "Authentication is required.");
+    if (redirectOnUnauthorized) {
+      handleUnauthorized();
+    }
+    throw error;
   }
-  handleUnauthorized("Please sign in to continue.");
-  return false;
+  if (!response.ok) {
+    throw await responseError(response, "Unable to prepare a secure request.");
+  }
+
+  const token = getCsrfToken();
+  if (!token) {
+    throw new AuthenticationError(
+      "The browser did not accept the CSRF protection cookie.",
+      500,
+    );
+  }
+  return token;
+}
+
+export async function ensureCsrfToken(options = {}) {
+  return getCsrfToken() || refreshCsrfToken(options);
+}
+
+function requestMethod(input, options) {
+  if (typeof options.method === "string") {
+    return options.method.toUpperCase();
+  }
+  if (input instanceof Request) {
+    return input.method.toUpperCase();
+  }
+  return "GET";
+}
+
+function isUnsafeMethod(method) {
+  return !["GET", "HEAD", "OPTIONS"].includes(method);
 }
 
 /**
- * Send a protected same-origin request with the current bearer token.
- * A backend 401 is authoritative: the local token is removed immediately.
+ * Send an authenticated same-origin request. The browser supplies the HttpOnly
+ * session cookie; JavaScript supplies only the separate CSRF token when needed.
  */
-export async function authorizedFetch(input, options = {}) {
-  const token = getAuthToken();
-  if (!token) {
-    handleUnauthorized("Please sign in to continue.");
-    throw new AuthenticationError("Authentication is required.");
-  }
-
+export async function authorizedFetch(
+  input,
+  options = {},
+  { redirectOnUnauthorized = true } = {},
+) {
   const url = sameOriginUrl(input);
   const headers = new Headers(options.headers || {});
-  headers.set("Authorization", `Bearer ${token}`);
+  if (isUnsafeMethod(requestMethod(input, options))) {
+    headers.set(
+      "X-CSRF-Token",
+      await ensureCsrfToken({ redirectOnUnauthorized }),
+    );
+  }
 
   const response = await window.fetch(url, {
     ...options,
@@ -161,15 +190,18 @@ export async function authorizedFetch(input, options = {}) {
   });
 
   if (response.status === 401) {
-    handleUnauthorized();
-    throw await responseError(response, "Authentication is required.");
+    const error = await responseError(response, "Authentication is required.");
+    if (redirectOnUnauthorized) {
+      handleUnauthorized();
+    }
+    throw error;
   }
   return response;
 }
 
-/** Authenticate with either a username or email address. */
+/** Authenticate without ever exposing the session credential to JavaScript. */
 export async function login(identifier, password) {
-  const response = await window.fetch("/api/auth/login", {
+  const response = await window.fetch("/api/auth/browser-login", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ identifier, password }),
@@ -195,12 +227,21 @@ export async function login(identifier, password) {
       500,
     );
   }
-  storeAuthToken(payload?.token);
+  if (!payload?.user || typeof payload.user !== "object" || !getCsrfToken()) {
+    throw new AuthenticationError(
+      "The server returned an invalid authentication response.",
+      500,
+    );
+  }
   return payload;
 }
 
-export async function getCurrentUser() {
-  const response = await authorizedFetch("/api/auth/me");
+export async function getCurrentUser({ redirectOnUnauthorized = true } = {}) {
+  const response = await authorizedFetch(
+    "/api/auth/me",
+    {},
+    { redirectOnUnauthorized },
+  );
   if (!response.ok) {
     throw await responseError(response, "Unable to load your account.");
   }
@@ -214,34 +255,24 @@ export async function getCurrentUser() {
   return payload.user;
 }
 
-/**
- * Ask the server to revoke the active session, then always remove the local
- * token. A missing/expired server session already satisfies logout.
- */
+/** Revoke the active server-side session and let the server clear its cookies. */
 export async function logout() {
-  const token = getAuthToken();
-  if (!token) {
-    clearAuthentication();
-    return { message: "Logged out." };
-  }
-
-  let response;
   try {
-    response = await window.fetch("/api/auth/logout", {
-      method: "POST",
-      headers: { Authorization: `Bearer ${token}` },
-      cache: "no-store",
-      credentials: "same-origin",
-    });
-  } finally {
-    clearAuthentication();
+    const response = await authorizedFetch(
+      "/api/auth/logout",
+      { method: "POST" },
+      { redirectOnUnauthorized: false },
+    );
+    if (!response.ok) {
+      throw await responseError(response, "Unable to sign out securely.");
+    }
+    return response.json();
+  } catch (error) {
+    // An expired/revoked session is already logged out, and the 401 response
+    // clears stale cookies. Network failures are not treated as success.
+    if (error?.status === 401) {
+      return { message: "Logged out." };
+    }
+    throw error;
   }
-
-  if (response.status === 401) {
-    return { message: "Logged out." };
-  }
-  if (!response.ok) {
-    throw await responseError(response, "Unable to confirm logout with the server.");
-  }
-  return response.json();
 }

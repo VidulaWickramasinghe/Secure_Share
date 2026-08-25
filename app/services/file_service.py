@@ -201,7 +201,7 @@ def upload_file(upload: FileStorage | None, owner: object) -> FileRecord:
     """Persist an uploaded file and its metadata for the authenticated owner."""
 
     original_filename = _validated_original_filename(upload)
-    assert upload is not None  # narrowed by validation above
+    assert upload is not None  # nosec B101
     stored_filename, stored_path, file_size = _write_upload(upload)
 
     record = FileRecord(
@@ -231,7 +231,8 @@ def user_can_access(record: FileRecord, user_id: int) -> bool:
     if record.owner_id == user_id:
         return True
     permission = db.session.execute(
-        select(FilePermission.id).where(
+        select(FilePermission.id)
+        .where(
             FilePermission.file_id == record.id,
             FilePermission.user_id == user_id,
         )

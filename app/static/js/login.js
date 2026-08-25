@@ -2,7 +2,6 @@ import {
   AUTH_NOTICE_EVENT,
   consumeAuthNotice,
   getCurrentUser,
-  isAuthenticated,
   login,
 } from "./auth.js";
 import {
@@ -37,23 +36,22 @@ async function initializeLogin() {
     );
   });
 
-  // A stored token is only a claim. Verify it with the API before redirecting.
-  if (isAuthenticated()) {
-    setButtonBusy(submitButton, true, "Checking session…");
-    try {
-      await getCurrentUser();
-      window.location.replace("/dashboard");
-      return;
-    } catch (error) {
-      if (isAuthenticated()) {
-        setFormAlert(
-          formAlert,
-          errorMessage(error, "Unable to verify your session."),
-        );
-      }
-    } finally {
-      setButtonBusy(submitButton, false);
+  // HttpOnly cookies are intentionally invisible to JavaScript. Ask the
+  // server whether this browser already has a valid session.
+  setButtonBusy(submitButton, true, "Checking session…");
+  try {
+    await getCurrentUser({ redirectOnUnauthorized: false });
+    window.location.replace("/dashboard");
+    return;
+  } catch (error) {
+    if (error?.status !== 401) {
+      setFormAlert(
+        formAlert,
+        errorMessage(error, "Unable to verify your session."),
+      );
     }
+  } finally {
+    setButtonBusy(submitButton, false);
   }
 
   form.addEventListener("submit", async (event) => {

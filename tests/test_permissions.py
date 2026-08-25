@@ -253,3 +253,35 @@ def test_permission_endpoints_require_authentication(client):
     assert client.delete(
         f"/api/files/{file_id}/permissions/1"
     ).status_code == 401
+
+
+def test_cookie_authenticated_permission_changes_require_valid_csrf(
+    client, register_user, login_user, browser_login_user, upload_file
+):
+    register_user("alice", "alice@example.com")
+    bob = register_user("bob", "bob@example.com")
+    alice_token = login_user("alice")
+    uploaded = upload_file(alice_token, filename="cookie-permissions.txt")
+    file_id = uploaded.get_json()["file"]["id"]
+    browser = browser_login_user("alice")
+
+    missing_grant_csrf = client.post(
+        f"/api/files/{file_id}/permissions", json={"user_id": bob["id"]}
+    )
+    valid_grant = client.post(
+        f"/api/files/{file_id}/permissions",
+        headers={"X-CSRF-Token": browser["csrf_token"]},
+        json={"user_id": bob["id"]},
+    )
+    missing_revoke_csrf = client.delete(
+        f"/api/files/{file_id}/permissions/{bob['id']}"
+    )
+    valid_revoke = client.delete(
+        f"/api/files/{file_id}/permissions/{bob['id']}",
+        headers={"X-CSRF-Token": browser["csrf_token"]},
+    )
+
+    assert missing_grant_csrf.status_code == 403
+    assert valid_grant.status_code == 201
+    assert missing_revoke_csrf.status_code == 403
+    assert valid_revoke.status_code == 200

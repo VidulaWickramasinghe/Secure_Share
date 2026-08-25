@@ -62,7 +62,7 @@
           id="login-form"
           class="form-stack"
           method="post"
-          action="/api/auth/login"
+          action="/api/auth/browser-login"
           novalidate
         >
           <div class="field">
@@ -98,6 +98,8 @@
             </div>
           </div>
 
+          <p class="form-assist"><a href="/forgot-password">Forgot your password?</a></p>
+
           <button id="login-submit" class="button button--primary button--block" type="submit">
             Sign in securely
           </button>
@@ -110,7 +112,7 @@
 
         <div class="security-note">
           <span class="security-note__icon" aria-hidden="true"></span>
-          <p><strong>Your session stays private.</strong> Credentials are sent only to the authenticated API and are never shown in the interface.</p>
+          <p><strong>Your session stays private.</strong> The browser credential is kept in an HttpOnly cookie and is never exposed to page scripts.</p>
         </div>
       </div>
     </section>

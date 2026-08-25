@@ -2,7 +2,7 @@
 
 import {
   authorizedFetch,
-  getAuthToken,
+  ensureCsrfToken,
   handleUnauthorized,
 } from "./auth.js";
 
@@ -13,6 +13,7 @@ const STATUS_MESSAGES = {
   404: "The requested item could not be found.",
   409: "That action conflicts with the current state.",
   413: "The selected file is too large.",
+  429: "Too many requests. Please wait and try again.",
   500: "Something went wrong on the server. Please try again.",
 };
 
@@ -66,7 +67,10 @@ async function publicJson(path, options = {}) {
   const response = await window.fetch(path, {
     ...options,
     cache: "no-store",
-    credentials: "same-origin",
+    // Public account-action endpoints never need ambient authentication.
+    // Omitting cookies also prevents an unrelated signed-in account from
+    // becoming part of a recovery or verification request.
+    credentials: "omit",
   });
   if (!response.ok) {
     throw await errorFromResponse(response);
@@ -79,6 +83,36 @@ export function registerAccount({ username, email, password }) {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ username, email, password }),
+  });
+}
+
+export function requestEmailVerification() {
+  return protectedJson("/api/auth/email-verification/request", {
+    method: "POST",
+  });
+}
+
+export function confirmEmailVerification(token) {
+  return publicJson("/api/auth/email-verification/confirm", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ token }),
+  });
+}
+
+export function requestPasswordReset(email) {
+  return publicJson("/api/auth/password-reset/request", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email }),
+  });
+}
+
+export function confirmPasswordReset(token, newPassword) {
+  return publicJson("/api/auth/password-reset/confirm", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ token, new_password: newPassword }),
   });
 }
 
@@ -124,20 +158,16 @@ export function deleteFile(fileId) {
  * The backend remains authoritative for authentication, size, and filename
  * validation. The browser sets the multipart boundary itself.
  */
-export function uploadFile(file, onProgress = null) {
-  const token = getAuthToken();
-  if (!token) {
-    handleUnauthorized("Please sign in to upload a file.");
-    return Promise.reject(new ApiError("Authentication is required.", 401));
-  }
-
+export async function uploadFile(file, onProgress = null) {
+  const csrfToken = await ensureCsrfToken();
   const formData = new FormData();
   formData.append("file", file);
 
   return new Promise((resolve, reject) => {
     const request = new XMLHttpRequest();
     request.open("POST", "/api/files", true);
-    request.setRequestHeader("Authorization", `Bearer ${token}`);
+    request.withCredentials = true;
+    request.setRequestHeader("X-CSRF-Token", csrfToken);
     request.setRequestHeader("Accept", "application/json");
 
     request.upload.addEventListener("progress", (event) => {

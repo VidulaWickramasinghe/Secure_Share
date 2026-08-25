@@ -264,3 +264,41 @@ def test_invalid_and_unknown_file_ids_return_not_found(
     assert client.delete(
         f"/api/files/{unknown_id}", headers=headers
     ).status_code == 404
+
+
+def test_cookie_authenticated_file_lifecycle_requires_csrf_for_mutations(
+    app, client, register_user, browser_login_user
+):
+    register_user("alice", "alice@example.com")
+    browser = browser_login_user("alice")
+
+    rejected = client.post(
+        "/api/files",
+        data={"file": (io.BytesIO(b"must not persist"), "rejected.txt")},
+        content_type="multipart/form-data",
+    )
+
+    assert rejected.status_code == 403
+    with app.app_context():
+        assert FileRecord.query.count() == 0
+    assert list(Path(app.config["UPLOAD_FOLDER"]).iterdir()) == []
+
+    uploaded = client.post(
+        "/api/files",
+        headers={"X-CSRF-Token": browser["csrf_token"]},
+        data={"file": (io.BytesIO(b"cookie authorized"), "cookie.txt")},
+        content_type="multipart/form-data",
+    )
+    assert uploaded.status_code == 201
+    file_id = uploaded.get_json()["file"]["id"]
+
+    download = client.get(f"/api/files/{file_id}/download")
+    assert download.status_code == 200
+    assert download.data == b"cookie authorized"
+
+    missing_delete_csrf = client.delete(f"/api/files/{file_id}")
+    assert missing_delete_csrf.status_code == 403
+    assert client.delete(
+        f"/api/files/{file_id}",
+        headers={"X-CSRF-Token": browser["csrf_token"]},
+    ).status_code == 200

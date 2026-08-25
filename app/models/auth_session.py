@@ -16,7 +16,7 @@ if TYPE_CHECKING:
 
 
 class AuthSession(db.Model):
-    """An opaque bearer-token session.
+    """An opaque server-side bearer or browser session.
 
     Only a SHA-256 digest of the token is persisted. A database disclosure
     therefore does not immediately disclose live bearer credentials.
@@ -34,6 +34,9 @@ class AuthSession(db.Model):
     token_hash: Mapped[str] = mapped_column(
         String(64), nullable=False, unique=True, index=True
     )
+    # Bearer-only sessions leave this null. Browser sessions store a digest of
+    # a separate JavaScript-readable CSRF token; the raw value is never stored.
+    csrf_token_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utc_now, nullable=False
     )
