@@ -110,12 +110,16 @@ command. It uses the checked-in Alembic revisions and is safe in three cases:
 - an empty database is initialized at the latest revision;
 - a migration-tracked database is upgraded to the latest revision; and
 - the exact four-table schema from releases predating Alembic is validated,
-  stamped at the baseline, and then upgraded without replacing its data.
+  stamped at the baseline, and then upgraded without replacing its data. This
+  also safely recovers an interrupted bootstrap that left an empty
+  `alembic_version` table.
 
 An unversioned database with missing, additional, or changed schema objects is
 rejected without being stamped. Back up every production database before an
 upgrade, investigate the mismatch, and never use `flask db stamp` merely to
-bypass validation. Operators can inspect state with:
+bypass validation. SQLite batch migrations preserve dependent rows, restore
+foreign-key enforcement, and fail if a foreign-key integrity check finds a
+violation. Operators can inspect state with:
 
 ```bash
 flask --app run.py db current

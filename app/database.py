@@ -53,15 +53,11 @@ def _build_baseline_metadata() -> sa.MetaData:
         sa.Column("token_hash", sa.String(length=64), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("expires_at", sa.DateTime(timezone=True), nullable=False),
-        sa.ForeignKeyConstraint(
-            ["user_id"], ["users.id"], ondelete="CASCADE"
-        ),
+        sa.ForeignKeyConstraint(["user_id"], ["users.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
     )
     sa.Index("ix_auth_sessions_user_id", auth_sessions.c.user_id)
-    sa.Index(
-        "ix_auth_sessions_token_hash", auth_sessions.c.token_hash, unique=True
-    )
+    sa.Index("ix_auth_sessions_token_hash", auth_sessions.c.token_hash, unique=True)
     sa.Index("ix_auth_sessions_expires_at", auth_sessions.c.expires_at)
     sa.Index(
         "ix_auth_sessions_user_expires",
@@ -78,12 +74,8 @@ def _build_baseline_metadata() -> sa.MetaData:
         sa.Column("owner_id", sa.Integer(), nullable=False),
         sa.Column("file_size", sa.BigInteger(), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
-        sa.CheckConstraint(
-            "file_size >= 0", name="ck_files_file_size_nonnegative"
-        ),
-        sa.ForeignKeyConstraint(
-            ["owner_id"], ["users.id"], ondelete="CASCADE"
-        ),
+        sa.CheckConstraint("file_size >= 0", name="ck_files_file_size_nonnegative"),
+        sa.ForeignKeyConstraint(["owner_id"], ["users.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
     )
     sa.Index("ix_files_stored_filename", files.c.stored_filename, unique=True)
@@ -96,16 +88,10 @@ def _build_baseline_metadata() -> sa.MetaData:
         sa.Column("file_id", sa.String(length=36), nullable=False),
         sa.Column("user_id", sa.Integer(), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
-        sa.ForeignKeyConstraint(
-            ["file_id"], ["files.id"], ondelete="CASCADE"
-        ),
-        sa.ForeignKeyConstraint(
-            ["user_id"], ["users.id"], ondelete="CASCADE"
-        ),
+        sa.ForeignKeyConstraint(["file_id"], ["files.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(["user_id"], ["users.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
-        sa.UniqueConstraint(
-            "file_id", "user_id", name="uq_file_permissions_file_user"
-        ),
+        sa.UniqueConstraint("file_id", "user_id", name="uq_file_permissions_file_user"),
     )
     sa.Index(
         "ix_file_permissions_user_file",
@@ -147,6 +133,18 @@ def _check_constraints_match(connection: sa.Connection) -> bool:
     return True
 
 
+def _include_baseline_object(
+    _object: object,
+    name: str | None,
+    type_: str,
+    _reflected: bool,
+    _compare_to: object | None,
+) -> bool:
+    """Exclude only Alembic's own bookkeeping table from schema checks."""
+
+    return not (type_ == "table" and name == ALEMBIC_VERSION_TABLE)
+
+
 def _matches_legacy_baseline(connection: sa.Connection) -> bool:
     """Return whether an unversioned database is exactly the known baseline."""
 
@@ -156,6 +154,7 @@ def _matches_legacy_baseline(connection: sa.Connection) -> bool:
             "compare_type": True,
             "compare_server_default": True,
             "target_metadata": BASELINE_METADATA,
+            "include_object": _include_baseline_object,
         },
     )
     return not compare_metadata(context, BASELINE_METADATA) and (
@@ -172,9 +171,21 @@ def initialize_database() -> str:
 
     with db.engine.connect() as connection:
         table_names = set(sa.inspect(connection).get_table_names())
-        if ALEMBIC_VERSION_TABLE in table_names:
+        has_version_table = ALEMBIC_VERSION_TABLE in table_names
+        application_tables = table_names - {ALEMBIC_VERSION_TABLE}
+        tracked_revisions = (
+            tuple(
+                connection.execute(
+                    sa.text("SELECT version_num FROM alembic_version")
+                ).scalars()
+            )
+            if has_version_table
+            else ()
+        )
+
+        if tracked_revisions:
             state = "upgraded"
-        elif not table_names:
+        elif not application_tables:
             state = "fresh"
         elif _matches_legacy_baseline(connection):
             state = "adopted"
