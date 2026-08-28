@@ -102,6 +102,55 @@ The API is then available at `http://127.0.0.1:5000`. After initialization,
 for development only; production should use a hardened WSGI deployment behind
 HTTPS.
 
+## Vercel build configuration
+
+Vercel does not discover `run.py` in its default Flask entrypoint locations.
+The repository explicitly selects the existing WSGI application in
+`pyproject.toml`, following [Vercel's Flask deployment guide](https://vercel.com/kb/guide/ship-a-flask-app-on-vercel):
+
+```toml
+[tool.vercel]
+entrypoint = "run:app"
+```
+
+This imports the `app` object from `run.py`; it does not start Flask's
+development server. In the Vercel project settings, use the repository root
+as the **Root Directory** and the **Flask** framework preset. Leave the build
+command and output directory at their framework defaults; do not use
+`python run.py` or `flask run` as a build command. Push the updated files to
+the connected deployment branch and deploy that new commit, rather than
+redeploying the old commit that lacks this setting.
+
+**This fixes entrypoint discovery, not full Vercel production compatibility.**
+The current backend requires persistent private filesystem storage and a
+separate email worker. Additional changes are needed before hosting real
+accounts or files on Vercel:
+
+- **Filesystem and database:** app startup creates `instance/` and creates or
+  changes permissions on `UPLOAD_FOLDER`. These operations target the project
+  directory by default and fail on Vercel's
+  [read-only function filesystem](https://vercel.com/docs/functions/runtimes#file-system-support).
+  Use external PostgreSQL, adapt startup to avoid writes to the application
+  bundle, and implement durable private object storage for uploaded bytes.
+  `/tmp` is temporary scratch space, not persistent upload or SQLite storage.
+  Changing environment variables alone does not replace the file service.
+- **Security and email:** configure the production variables documented below,
+  including independent secrets, shared Redis, SMTP, an HTTPS
+  `PUBLIC_BASE_URL`, and the production password blocklist. Run database
+  migrations explicitly and run the existing email worker on a separate
+  worker host with the same database and security configuration. Do not
+  disable production validation to make a deployment start.
+- **Static assets:** Vercel's Flask guide requires assets in `public/`.
+  Publish the existing `app/static/` assets as `public/static/` to preserve
+  the templates' `/static/...` URLs when adding full Vercel support.
+- **Upload size:** Vercel limits function request bodies to
+  [4.5 MB](https://vercel.com/docs/vercel-blob/server-upload), below this app's
+  default 16 MiB limit. Adapt the upload flow or lower the request limit;
+  private downloads must continue to enforce current database permissions.
+
+To run the current storage design without that migration, use a WSGI host
+with a persistent private volume and a separate supervised email worker.
+
 ## Database migrations
 
 `flask --app run.py init-db` is the supported initialization and upgrade
