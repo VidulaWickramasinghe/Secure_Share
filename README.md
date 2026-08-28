@@ -113,15 +113,40 @@ The repository explicitly selects the existing WSGI application in
 entrypoint = "run:app"
 ```
 
-This imports the `app` object from `run.py`; it does not start Flask's
-development server. In the Vercel project settings, use the repository root
-as the **Root Directory** and the **Flask** framework preset. Leave the build
-command and output directory at their framework defaults; do not use
-`python run.py` or `flask run` as a build command. Push the updated files to
-the connected deployment branch and deploy that new commit, rather than
-redeploying the old commit that lacks this setting.
+Vercel uses `pyproject.toml` as the dependency manifest when it is present, so
+it must also contain a complete `[project]` table, not just `[tool.*]` settings.
+The project declares all runtime dependencies there and checks that they match
+the constraints in `requirements.txt`. `.python-version` selects Python 3.12
+for deployment, while `requires-python` retains support for Python 3.12+.
+The committed `uv.lock` makes Vercel's dependency installation reproducible.
+The app is not installed as a distribution (`tool.uv.package = false`);
+Vercel bundles the application source directly.
 
-**This fixes entrypoint discovery, not full Vercel production compatibility.**
+After changing runtime dependencies, update both manifests and regenerate
+the lockfile with `uv lock`. To check the same dependency path Vercel uses,
+run these commands in a clean checkout (the sync command replaces `.venv`
+contents with production dependencies only):
+
+```bash
+python -m pip install uv==0.10.11
+uv lock --check
+uv sync --frozen --no-dev --no-editable
+uv pip check
+```
+
+CI runs these checks with Vercel's `uv` version (0.10.11) and imports `run:app`
+in that clean environment, separately from the pip-based test environments.
+
+The `run:app` entrypoint imports the `app` object from `run.py`; it does not
+start Flask's development server. In the Vercel project settings, use the
+repository root as the **Root Directory** and the **Flask** framework preset.
+Leave the build command and output directory at their framework defaults;
+do not use `python run.py` or `flask run` as a build command. Push the updated
+files to the connected deployment branch and deploy that new commit, rather
+than redeploying the old commit that lacks this setting.
+
+**These settings cover entrypoint discovery and dependency installation,
+not full Vercel production compatibility.**
 The current backend requires persistent private filesystem storage and a
 separate email worker. Additional changes are needed before hosting real
 accounts or files on Vercel:
