@@ -197,6 +197,7 @@ def test_init_db_recovers_interrupted_legacy_adoption(tmp_path):
         assert db.session.get(FileRecord, file_id).original_filename == (
             "legacy-report.pdf"
         )
+        assert db.session.get(FileRecord, file_id).storage_backend == "filesystem"
         permission = db.session.get(FilePermission, 9)
         assert permission.file_id == file_id
         assert permission.user_id == 43

@@ -51,6 +51,10 @@ class FileRecord(db.Model):
         nullable=False,
     )
     file_size = db.Column(db.BigInteger, nullable=False)
+    # Retain each file's location when the deployment changes its write backend.
+    storage_backend = db.Column(
+        db.String(16), nullable=False, default="filesystem", server_default="filesystem"
+    )
     created_at = db.Column(
         db.DateTime(timezone=True),
         nullable=False,

@@ -105,6 +105,37 @@ jobs:
           assert not app.extensions
           PY
 
+      - name: Verify configured Vercel startup does not write to its bundle
+        env:
+          VERCEL: "1"
+          APP_ENV: production
+          DATABASE_URL: "postgresql+psycopg://database.example.invalid/secure_share"
+          RATELIMIT_STORAGE_URI: "redis://redis.example.invalid:6379/0"
+          PUBLIC_BASE_URL: "https://secure-share.example"
+          SMTP_HOST: "smtp.example.invalid"
+          PYTHON_DOTENV_DISABLED: "1"
+        run: |
+          .venv/bin/python - <<'PY'
+          import os
+          import secrets
+          from pathlib import Path
+          from unittest.mock import patch
+
+          for name in ('SECRET_KEY', 'ACCOUNT_TOKEN_PEPPER', 'RATE_LIMIT_KEY_SECRET',
+                       'CRON_SECRET', 'BLOB_READ_WRITE_TOKEN'):
+              os.environ[name] = secrets.token_urlsafe(48)
+          with patch.object(Path, 'mkdir', side_effect=AssertionError('bundle write')):
+              with patch.object(Path, 'chmod', side_effect=AssertionError('bundle write')):
+                  from run import app
+                  assert 'sqlalchemy' in app.extensions
+                  client = app.test_client()
+                  base = 'https://secure-share.example'
+                  assert client.get('/', base_url=base).status_code == 200
+                  assert client.get('/static/css/style.css', base_url=base).status_code == 200
+                  assert client.get('/api/files', base_url=base).status_code == 401
+                  assert client.post('/api/internal/email-worker', base_url=base).status_code == 401
+          PY
+
   security:
     name: Static and dependency security checks
     runs-on: ubuntu-latest

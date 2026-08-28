@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import io
 import os
 import re
 import stat
@@ -10,9 +11,12 @@ from typing import BinaryIO
 from uuid import uuid4
 
 from flask import current_app
+from httpx import HTTPError
 from sqlalchemy import func, or_, select
 from werkzeug.datastructures import FileStorage
 from werkzeug.utils import secure_filename
+from vercel.blob import BlobClient
+from vercel.blob.errors import BlobError, BlobNotFoundError
 
 from app.extensions import db
 from app.models.file import FileRecord
@@ -68,9 +72,72 @@ class StoredFileUnavailableError(FileServiceError):
     message = "File is unavailable."
 
 
+class StorageServiceUnavailableError(FileServiceError):
+    status_code = 503
+    message = "Private file storage is temporarily unavailable."
+
+
+def _blob_client() -> BlobClient:
+    token = current_app.config.get("BLOB_READ_WRITE_TOKEN")
+    if not token:
+        raise StorageServiceUnavailableError()
+    return BlobClient(token=token)
+
+
+def _blob_key(stored_filename: str) -> str:
+    # Never use user filenames, URLs, or paths from a request as object keys.
+    if not _OPAQUE_FILENAME_PATTERN.fullmatch(stored_filename):
+        raise StoredFileUnavailableError()
+    return f"secure-share/{stored_filename}"
+
+
+def _write_blob(upload: FileStorage) -> tuple[str, None, int]:
+    maximum = _maximum_file_size()
+    content = io.BytesIO()
+    while True:
+        chunk = upload.stream.read(min(_COPY_CHUNK_SIZE, maximum - content.tell() + 1))
+        if not chunk:
+            break
+        content.write(chunk)
+        if content.tell() > maximum:
+            raise FileTooLargeError()
+    stored_filename = uuid4().hex
+    try:
+        with _blob_client() as client:
+            client.put(
+                _blob_key(stored_filename),
+                content.getvalue(),
+                access="private",
+                content_type="application/octet-stream",
+                add_random_suffix=False,
+                overwrite=False,
+            )
+    except (BlobError, HTTPError) as exc:
+        # SDK errors may include URLs/credentials; do not echo or log their text.
+        raise StorageServiceUnavailableError() from exc
+    return stored_filename, None, content.tell()
+
+
+def _delete_stored_bytes(stored_filename: str, backend: str) -> None:
+    if backend == "filesystem":
+        _storage_path(stored_filename).unlink(missing_ok=True)
+    elif backend == "vercel_blob":
+        try:
+            with _blob_client() as client:
+                client.delete(_blob_key(stored_filename))
+        except BlobNotFoundError:
+            pass
+        except (BlobError, HTTPError) as exc:
+            raise StorageServiceUnavailableError() from exc
+    else:
+        raise StoredFileUnavailableError()
+
+
 def _storage_root() -> Path:
     """Resolve the configured, non-public storage directory."""
 
+    if os.getenv("VERCEL") == "1":
+        raise StoredFileUnavailableError()
     configured_path = current_app.config.get("UPLOAD_FOLDER")
     if not configured_path:
         raise RuntimeError("UPLOAD_FOLDER must be configured.")
@@ -181,7 +248,12 @@ def _copy_with_limit(
             destination.unlink(missing_ok=True)
 
 
-def _write_upload(upload: FileStorage) -> tuple[str, Path, int]:
+def _write_upload(upload: FileStorage) -> tuple[str, Path | None, int]:
+    backend = current_app.config["FILE_STORAGE_BACKEND"]
+    if backend == "vercel_blob":
+        return _write_blob(upload)
+    if backend != "filesystem":
+        raise StorageServiceUnavailableError()
     maximum_size = _maximum_file_size()
 
     # O_EXCL handles the practically impossible UUID collision without ever
@@ -202,20 +274,29 @@ def upload_file(upload: FileStorage | None, owner: object) -> FileRecord:
 
     original_filename = _validated_original_filename(upload)
     assert upload is not None  # nosec B101
-    stored_filename, stored_path, file_size = _write_upload(upload)
+    stored_filename, _, file_size = _write_upload(upload)
+    backend = current_app.config["FILE_STORAGE_BACKEND"]
 
     record = FileRecord(
         original_filename=original_filename,
         stored_filename=stored_filename,
         owner_id=owner.id,
         file_size=file_size,
+        storage_backend=backend,
     )
     try:
         db.session.add(record)
         db.session.commit()
     except Exception:
         db.session.rollback()
-        stored_path.unlink(missing_ok=True)
+        try:
+            _delete_stored_bytes(stored_filename, backend)
+        except (OSError, FileServiceError):
+            # An orphan remains private. Report only its opaque key so an
+            # operator can reconcile it; preserve the original database error.
+            current_app.logger.error(
+                "Upload rollback cleanup failed for %s", stored_filename
+            )
         raise
     return record
 
@@ -231,8 +312,7 @@ def user_can_access(record: FileRecord, user_id: int) -> bool:
     if record.owner_id == user_id:
         return True
     permission = db.session.execute(
-        select(FilePermission.id)
-        .where(
+        select(FilePermission.id).where(
             FilePermission.file_id == record.id,
             FilePermission.user_id == user_id,
         )
@@ -323,6 +403,28 @@ def list_accessible_file_summaries(user_id: int) -> list[dict[str, object]]:
 def _open_stored_file(record: FileRecord) -> BinaryIO:
     """Open a validated regular file without following a final symlink."""
 
+    if record.storage_backend == "vercel_blob":
+        key = _blob_key(record.stored_filename)
+        if record.file_size > _maximum_file_size():
+            raise FileTooLargeError()
+        try:
+            with _blob_client() as client:
+                metadata = client.head(key)
+                if metadata.size != record.file_size:
+                    raise StoredFileUnavailableError()
+                result = client.get(key, access="private", use_cache=False, timeout=20)
+                if result.status_code != 200 or len(result.content) != record.file_size:
+                    raise StoredFileUnavailableError()
+                return io.BytesIO(result.content)
+        except BlobNotFoundError as exc:
+            raise StoredFileUnavailableError() from exc
+        except (BlobError, HTTPError) as exc:
+            raise StorageServiceUnavailableError() from exc
+    if record.storage_backend != "filesystem":
+        raise StoredFileUnavailableError()
+    # A Vercel deployment must never interpret legacy local paths as /tmp data.
+    if os.getenv("VERCEL") == "1":
+        raise StoredFileUnavailableError()
     stored_path = _storage_path(record.stored_filename)
     flags = os.O_RDONLY
     if hasattr(os, "O_CLOEXEC"):
@@ -359,11 +461,10 @@ def delete_file(file_id: str, owner_id: int) -> FileRecord:
     """Delete a file and its permission records; only its owner may do so."""
 
     record = get_owned_file(file_id, owner_id)
-    stored_path = _storage_path(record.stored_filename)
 
     # Delete the bytes before metadata so a successful API response never leaves
     # the supposedly deleted content downloadable through this application.
-    stored_path.unlink(missing_ok=True)
+    _delete_stored_bytes(record.stored_filename, record.storage_backend)
 
     try:
         db.session.query(FilePermission).filter_by(file_id=record.id).delete(

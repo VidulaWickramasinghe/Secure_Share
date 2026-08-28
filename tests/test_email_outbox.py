@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import secrets
 from datetime import timedelta
 from urllib.parse import parse_qs, urlsplit
 
@@ -80,6 +81,46 @@ def test_job_schema_cannot_persist_message_content_or_secrets(app):
             for column in SecurityEmailJob.__table__.columns
             for fragment in forbidden_fragments
         )
+
+
+def test_http_worker_requires_its_own_secret_and_processes_bounded_batches(app, client):
+    app.config.update(
+        CRON_SECRET=secrets.token_urlsafe(48),
+        SECURITY_EMAIL_INLINE_DELIVERY=False,
+        SECURITY_EMAIL_HTTP_BATCH_SIZE=1,
+    )
+    with app.app_context():
+        user = _create_user(verified=True)
+        enqueue_security_email(user, PASSWORD_RESET)
+        enqueue_security_email(user, PASSWORD_CHANGED)
+        db.session.commit()
+    path = "/api/internal/email-worker"
+    for headers in (
+        {},
+        {"Authorization": "Bearer wrong"},
+        {"Authorization": f"Bearer {app.config['SECRET_KEY']}"},
+    ):
+        response = client.post(path, headers=headers)
+        assert response.status_code == 401
+    with app.app_context():
+        assert all(job.attempts == 0 for job in SecurityEmailJob.query.all())
+    headers = {"Authorization": f"Bearer {app.config['CRON_SECRET']}"}
+    first = client.post(path + "?limit=1000", headers=headers, json={"limit": 1000})
+    assert first.status_code == 200
+    assert first.get_json() == {"processed": 1, "outcomes": {"completed": 1}}
+    assert first.headers["Cache-Control"] == "no-store"
+    assert app.config["CRON_SECRET"] not in first.get_data(as_text=True)
+    second = client.get(path, headers=headers)
+    assert second.get_json() == {"processed": 1, "outcomes": {"completed": 1}}
+    assert client.get(path, headers=headers).get_json() == {
+        "processed": 0,
+        "outcomes": {},
+    }
+
+
+def test_http_worker_stays_disabled_without_a_secret(app, client):
+    app.config["CRON_SECRET"] = None
+    assert client.post("/api/internal/email-worker").status_code == 503
 
 
 def test_enqueue_cancels_prior_job_and_invalidates_active_challenge(app):
@@ -305,9 +346,7 @@ def test_batch_processor_honors_limit_and_returns_secret_free_summaries(app):
         assert len(app.extensions["secure_share_mail_outbox"]) == 2
 
 
-def test_reset_request_queues_delivery_until_worker_runs(
-    app, client, register_user
-):
+def test_reset_request_queues_delivery_until_worker_runs(app, client, register_user):
     user = register_user("queued-reset", "queued-reset@example.com")
     app.extensions["secure_share_mail_outbox"].clear()
     app.config["SECURITY_EMAIL_INLINE_DELIVERY"] = False
@@ -329,13 +368,16 @@ def test_reset_request_queues_delivery_until_worker_runs(
             )
         ).scalar_one()
         assert job.attempts == 0
-        assert db.session.execute(
-            select(AccountActionToken).where(
-                AccountActionToken.user_id == user["id"],
-                AccountActionToken.purpose == PASSWORD_RESET,
-                AccountActionToken.invalidated_at.is_(None),
-            )
-        ).scalar_one_or_none() is None
+        assert (
+            db.session.execute(
+                select(AccountActionToken).where(
+                    AccountActionToken.user_id == user["id"],
+                    AccountActionToken.purpose == PASSWORD_RESET,
+                    AccountActionToken.invalidated_at.is_(None),
+                )
+            ).scalar_one_or_none()
+            is None
+        )
 
     worker = app.test_cli_runner().invoke(args=["email-worker", "--once"])
 

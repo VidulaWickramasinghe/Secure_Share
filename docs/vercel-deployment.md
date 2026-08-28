@@ -1,93 +1,134 @@
-# Vercel deployment: startup and remaining requirements
+# Configure Secure Share on Vercel
 
-## Current status
+## Why the setup page appears
 
-The Python dependency manifest and `run:app` entrypoint are configured. That
-allows Vercel to build the project; it does **not** make the backend ready.
-The observed production crash after those fixes was:
+The setup page is a real HTTP 503: the application is not ready to accept users.
+It replaces a configuration-driven function crash, not the application itself.
+Check the runtime logs for the consolidated list of missing/invalid settings.
+Only setting names and fixed messages are logged; secret values stay private.
 
-```text
-RuntimeError: Production requires a stable high-entropy SECRET_KEY
-```
+The repository now supports private Vercel Blob uploads and a bounded,
+authenticated email-worker endpoint. It no longer rejects Vercel unconditionally.
+With valid settings it starts the real application without writing directories
+inside the function bundle. Do not switch to development mode or `/tmp` storage
+to make the setup page disappear.
 
-`run.py` now catches known configuration failures and exports a minimal Flask
-application that returns **HTTP 503**. All authentication, upload and download
-operations remain unavailable. The public response contains no configuration
-values, credentials or traceback. Vercel runtime logs contain a consolidated
-checklist. Unexpected programming errors still fail visibly for diagnosis.
+## 1. Connect services and set environment variables
 
-**A setup page is not a completed deployment.** This repository's filesystem
-upload backend and persistent email worker still need a suitable host or a
-serverless implementation. Setting `UPLOAD_FOLDER=/tmp`, using SQLite, disabling
-production checks or generating a new secret on each cold start is not a fix.
+Use **Project → Settings → Environment Variables**. Scope values to Production
+and, if needed, a separate Preview environment. Do not share production databases
+or private Blob stores with untrusted preview branches.
 
-## Check all startup settings
+| Setting | Required value |
+| --- | --- |
+| `APP_ENV` | `production` (also the default on Vercel). |
+| `SECRET_KEY` | An independently generated random secret of at least 32 characters, stable across redeployments. |
+| `ACCOUNT_TOKEN_PEPPER` | A second independent secret of at least 32 characters. |
+| `RATE_LIMIT_KEY_SECRET` | A third independent secret of at least 32 characters. |
+| `CRON_SECRET` | A fourth independent secret of at least 32 characters for the scheduler endpoint. |
+| `DATABASE_URL` | An external PostgreSQL URL. `postgres://` and `postgresql://` prefixes are normalized to the installed psycopg driver. |
+| `RATELIMIT_STORAGE_URI` | A supported Redis connection URI (`rediss://` where supported), not an HTTP/REST endpoint. |
+| `PUBLIC_BASE_URL` | `https://secure-share-tau-lilac.vercel.app` for this production site. Preview needs its own trusted canonical HTTPS origin. |
+| `FILE_STORAGE_BACKEND` | `vercel_blob` (the Vercel default). |
+| `BLOB_READ_WRITE_TOKEN` | Connect a **private** Vercel Blob store to this project. Vercel supplies this credential. A public store is not suitable for private files. |
+| `MAIL_BACKEND` | `smtp` (the production default). |
+| `SMTP_HOST`, `SMTP_PORT` | Your email provider's SMTP host and TLS port; default port 587. |
+| `SMTP_USERNAME`, `SMTP_PASSWORD` | Your provider's SMTP credentials, if required. |
+| `MAIL_FROM_ADDRESS` | A sender address verified by your provider. |
+| `SMTP_USE_SSL`, `SMTP_USE_STARTTLS` | Exactly one true. Defaults: SSL false, STARTTLS true. |
+| `BROWSER_COOKIE_SECURE` | `true` (production default). |
+| `SECURITY_EMAIL_INLINE_DELIVERY` | `false` (production default). |
 
-From the repository root, with your intended production settings in the shell
-or a private `.env` file, run:
+Optional numeric/boolean values may be omitted or left blank for safe defaults.
+Do not paste the development `.env.example` wholesale into Vercel: its explicit
+filesystem, HTTP, SQLite and development settings are not production settings.
+Keep credentials in Vercel or a password manager, never in Git or chat.
+
+`PUBLIC_BASE_URL` may be omitted when Vercel system variables are exposed: it
+defaults to the production domain in Production and the deployment URL in Preview.
+An explicitly configured value is still validated and takes precedence.
+
+`PASSWORD_BLOCKLIST_PATH` can be omitted in production. The app bundles 10,000
+unique common-password SHA-256 digests, with source pin/checksum and MIT
+attribution in `app/data/password-blocklist-source.md`. It is a baseline, not a
+complete breach corpus. You may override it with a larger maintained digest file.
+
+## 2. Apply database migrations
+
+From a trusted local environment with these service settings, install dependencies
+and check static configuration before initializing the database:
 
 ```bash
-VERCEL=1 python check_deployment.py
+uv sync --frozen --no-dev
+VERCEL=1 uv run --no-sync python check_deployment.py
+VERCEL=1 uv run --no-sync flask --app run:app init-db
 ```
 
-The command exits with status 1 and lists problems together. It does not connect
-to external services, migrate databases or write upload directories. It prints
-setting names and fixed instructions, not values. Do not commit `.env` files or
-paste secrets into issues, logs or chat.
+The checker does not connect to services or certify that they work. `init-db`
+applies migrations to the configured database; run it deliberately, not on every
+cold start and not as an unauthenticated HTTP endpoint.
 
-Optional numeric and boolean settings may be omitted or left blank to use the
-documented defaults. Nonblank malformed values are rejected. On Vercel,
-`APP_ENV` must be `production` (an omitted or blank value defaults to production).
+Migration `20260828_0005` adds each file's storage backend. Existing records remain
+`filesystem`; no uploaded bytes are moved or deleted. New Vercel uploads use
+`vercel_blob`. Existing local files require a separate, verified migration of
+their bytes before they can be served on Vercel. Changing the default write
+backend never silently reclassifies existing files.
 
-## Required production setup
+## 3. Schedule security email processing
 
-| Setting or service | Requirement |
-| --- | --- |
-| `SECRET_KEY` | A stable, randomly generated secret of at least 32 characters. |
-| `ACCOUNT_TOKEN_PEPPER` | A second independent, stable secret of at least 32 characters. |
-| `RATE_LIMIT_KEY_SECRET` | A third independent, stable secret of at least 32 characters. |
-| `DATABASE_URL` | An external PostgreSQL connection URL; apply the repository migrations before serving users. |
-| `RATELIMIT_STORAGE_URI` | A supported Redis connection URI, shared across instances; an HTTP/REST endpoint is not interchangeable with this URI. |
-| `PUBLIC_BASE_URL` | The canonical HTTPS origin, with no credentials, query or application path. |
-| `MAIL_BACKEND`, `SMTP_HOST` | `smtp` and a real SMTP server; configure its port, credentials, sender and exactly one TLS mode. |
-| `PASSWORD_BLOCKLIST_PATH` | A readable file containing at least 10,000 unique SHA-256 digests of known compromised passwords; do not use fabricated digests. |
-| `BROWSER_COOKIE_SECURE` | `true`. |
-| `SECURITY_EMAIL_INLINE_DELIVERY` | `false`; run the separate email worker with the same database and secrets. |
-| File storage | The current implementation requires a private persistent filesystem. Vercel requires implementing a private object-storage backend before enabling file operations. |
+The existing database outbox retains jobs, leases, retries and token protection.
+Invoke this endpoint using **GET or POST**:
 
-Use your password manager to generate and store the three independent secrets.
-Do not rotate existing production keys merely to make a deployment pass; rotation
-can invalidate outstanding account links and change rate-limit identifiers.
-Changing Vercel environment variables affects **new deployments**, so redeploy
-after correcting settings. Check both Preview and Production scopes.
+```text
+https://secure-share-tau-lilac.vercel.app/api/internal/email-worker
+Authorization: Bearer <CRON_SECRET>
+```
 
-### Hosting choices
+Supply the header through your scheduler's secret settings, not a URL query
+parameter. The endpoint processes one job per invocation on Vercel and returns
+only aggregate outcome counts. Repeated calls do not resend completed jobs; an
+interrupted delivery becomes eligible again after its lease. Set the cadence and
+concurrency to match the queue volume and monitor retries/backlog.
 
-To run the current implementation without redesigning file storage, host the
-Flask backend on a server/container with a private persistent volume and run
-`flask --app run:app email-worker` as a separate supervised process. Configure
-HTTPS, PostgreSQL, Redis, SMTP and the blocklist there. Run the configuration
-checker without `VERCEL=1`; a successful static check still does not verify
-service connectivity or database migrations.
+Vercel Cron can supply `Authorization: Bearer CRON_SECRET` automatically. For a
+plan supporting frequent jobs, merge a `crons` entry into the existing
+`vercel.json`, for example:
 
-To keep the backend on Vercel, first implement private durable object storage
-and deploy the mail worker separately (or implement a secure durable-job
-integration). Update the Vercel-specific validation only after those integrations
-exist and have end-to-end tests. The current validation deliberately rejects
-Vercel's filesystem storage instead of accepting uploads that can disappear.
+```json
+"crons": [{ "path": "/api/internal/email-worker", "schedule": "* * * * *" }]
+```
 
-## Verify a new deployment
+This is a configuration fragment, not a complete JSON file. Vercel Hobby cron
+runs at most once per day, which is unsuitable for prompt verification/reset
+email. Use a suitable external scheduler or the CLI worker instead; no scheduler
+or paid plan is enabled automatically by this repository. A scheduler calling
+the deployment hostname must use a host accepted by `PUBLIC_BASE_URL`/trusted
+hosts. Check its HTTP result; do not treat 400/401/503 as successful processing.
 
-1. Inspect **runtime logs**, not only build logs. Configuration messages are
-   consolidated under `Deployment configuration is incomplete`.
-2. Request `/` and an API endpoint. While setup is incomplete, both must return
-   **503**; `/healthz` also returns 503. No API may accept uploads or credentials.
-   The setup response is not a readiness success.
-3. After the hosting/storage work and configuration are complete, apply database
-   migrations once using `flask --app run:app init-db` in a controlled environment.
-4. Verify registration, verification email delivery, sign-in, authenticated
-   upload/download, access denial for another user, password reset and worker
-   retries. Confirm uploaded bytes survive deployment/instance replacement.
+The repository configures a 300-second function duration. On Vercel,
+`SECURITY_EMAIL_HTTP_BATCH_SIZE=1` and `SMTP_TIMEOUT_SECONDS<=10` keep work bounded.
+If you deploy on another host, the supervised CLI `email-worker` remains available.
 
-Reference: [Flask on Vercel](https://vercel.com/docs/frameworks/backend/flask)
-and [Vercel Functions limits](https://vercel.com/docs/functions/limitations).
+## 4. Redeploy and verify
+
+Environment changes apply to new deployments. Redeploy after configuration and
+migrations, then check **runtime logs**, not just the build status.
+
+- `/` should render the actual login page. A 503 setup page is not success.
+- Register an account; verify the scheduler delivers the email and the link works.
+- Sign in, upload a file, download the exact bytes, and verify another user cannot
+  download it until authorized. Revoke access and verify it is denied again.
+- Redeploy and confirm the file survives. Delete it and verify the object and
+  metadata are gone. Private Blob URLs and credentials must never reach clients.
+- Test password reset and retry behavior. Keep monitoring queue outcomes.
+
+Vercel limits request/response bodies to 4.5 MB. This backend defaults to a 4 MiB
+request limit and a file limit 64 KiB smaller to allow multipart framing. Omit the
+local 16 MiB `MAX_CONTENT_LENGTH` setting. Larger files need a separately designed
+authenticated direct-upload/download flow; they are not silently accepted here.
+
+References: [private Blob storage](https://vercel.com/docs/vercel-blob),
+[Python SDK](https://github.com/vercel/vercel-py/tree/main/src/vercel/blob),
+[cron security](https://vercel.com/docs/cron-jobs/manage-cron-jobs),
+[cron plan limits](https://vercel.com/docs/cron-jobs/usage-and-pricing),
+[function limits](https://vercel.com/docs/functions/limitations).
