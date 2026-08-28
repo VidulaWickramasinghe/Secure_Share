@@ -1,4 +1,4 @@
-"""Development entry point for Secure Share."""
+"""WSGI entrypoint for deployment and local development of Secure Share."""
 
 from app import create_app
 
