@@ -77,20 +77,34 @@ def _database_url() -> str:
         # psycopg v3 explicitly; a bare postgresql:// URL otherwise defaults to
         # the separately packaged psycopg2 driver.
         if configured_url.startswith("postgres://"):
-            return configured_url.replace(
-                "postgres://", "postgresql+psycopg://", 1
-            )
+            return configured_url.replace("postgres://", "postgresql+psycopg://", 1)
         if configured_url.startswith("postgresql://"):
-            return configured_url.replace(
-                "postgresql://", "postgresql+psycopg://", 1
-            )
+            return configured_url.replace("postgresql://", "postgresql+psycopg://", 1)
         return configured_url
 
     database_path = PROJECT_ROOT / "instance" / "secure_share.db"
     return f"sqlite:///{database_path}"
 
 
-APPLICATION_ENVIRONMENT = _application_environment()
+_configuration_errors: list[str] = []
+
+
+def _read_setting(reader, name, default):
+    """Collect parse failures; validation rejects the entire config before use."""
+
+    try:
+        return reader(name, default)
+    except ValueError as exc:
+        _configuration_errors.append(str(exc))
+        return default
+
+
+try:
+    APPLICATION_ENVIRONMENT = _application_environment()
+except ValueError as exc:
+    _configuration_errors.append(str(exc))
+    # Used only to collect all production errors, never to start the service.
+    APPLICATION_ENVIRONMENT = "production"
 
 
 class Config:
@@ -113,19 +127,21 @@ class Config:
     UPLOAD_FOLDER = os.getenv("UPLOAD_FOLDER", "").strip() or str(
         PROJECT_ROOT / "storage"
     )
-    MAX_CONTENT_LENGTH = _positive_int_from_env(
-        "MAX_CONTENT_LENGTH", 16 * 1024 * 1024
+    MAX_CONTENT_LENGTH = _read_setting(
+        _positive_int_from_env, "MAX_CONTENT_LENGTH", 16 * 1024 * 1024
     )
-    SESSION_LIFETIME_SECONDS = _positive_int_from_env(
-        "SESSION_LIFETIME_SECONDS", 24 * 60 * 60
+    SESSION_LIFETIME_SECONDS = _read_setting(
+        _positive_int_from_env, "SESSION_LIFETIME_SECONDS", 24 * 60 * 60
     )
     # Browser sessions use application-owned cookies rather than Flask's signed
     # client-side session. Production forces Secure on; the documented local
     # development environment uses HTTP and therefore disables it explicitly.
     BROWSER_SESSION_COOKIE_NAME = "secure_share_session"
     BROWSER_CSRF_COOKIE_NAME = "secure_share_csrf"
-    BROWSER_COOKIE_SECURE = _boolean_from_env(
-        "BROWSER_COOKIE_SECURE", APPLICATION_ENVIRONMENT == "production"
+    BROWSER_COOKIE_SECURE = _read_setting(
+        _boolean_from_env,
+        "BROWSER_COOKIE_SECURE",
+        APPLICATION_ENVIRONMENT == "production",
     )
     BROWSER_COOKIE_SAMESITE = "Lax"
 
@@ -176,14 +192,16 @@ class Config:
     # stable pepper is mandatory in production; development falls back to the
     # application secret so a fresh checkout remains easy to run.
     ACCOUNT_TOKEN_PEPPER = os.getenv("ACCOUNT_TOKEN_PEPPER") or SECRET_KEY
-    EMAIL_VERIFICATION_TOKEN_LIFETIME_SECONDS = _positive_int_from_env(
-        "EMAIL_VERIFICATION_TOKEN_LIFETIME_SECONDS", 24 * 60 * 60
+    EMAIL_VERIFICATION_TOKEN_LIFETIME_SECONDS = _read_setting(
+        _positive_int_from_env,
+        "EMAIL_VERIFICATION_TOKEN_LIFETIME_SECONDS",
+        24 * 60 * 60,
     )
-    PASSWORD_RESET_TOKEN_LIFETIME_SECONDS = _positive_int_from_env(
-        "PASSWORD_RESET_TOKEN_LIFETIME_SECONDS", 60 * 60
+    PASSWORD_RESET_TOKEN_LIFETIME_SECONDS = _read_setting(
+        _positive_int_from_env, "PASSWORD_RESET_TOKEN_LIFETIME_SECONDS", 60 * 60
     )
-    PASSWORD_RESET_MINIMUM_RESPONSE_SECONDS = _nonnegative_float_from_env(
-        "PASSWORD_RESET_MINIMUM_RESPONSE_SECONDS", 0.5
+    PASSWORD_RESET_MINIMUM_RESPONSE_SECONDS = _read_setting(
+        _nonnegative_float_from_env, "PASSWORD_RESET_MINIMUM_RESPONSE_SECONDS", 0.5
     )
 
     # The file backend is intentionally development-only and writes private
@@ -195,38 +213,43 @@ class Config:
     MAIL_FROM_ADDRESS = os.getenv("MAIL_FROM_ADDRESS") or "no-reply@secure-share.local"
     MAIL_FILE_OUTBOX = os.getenv("MAIL_FILE_OUTBOX", "").strip() or "mail-outbox"
     SMTP_HOST = os.getenv("SMTP_HOST") or None
-    SMTP_PORT = _positive_int_from_env("SMTP_PORT", 587)
+    SMTP_PORT = _read_setting(_positive_int_from_env, "SMTP_PORT", 587)
     SMTP_USERNAME = os.getenv("SMTP_USERNAME") or None
     SMTP_PASSWORD = os.getenv("SMTP_PASSWORD") or None
-    SMTP_USE_SSL = _boolean_from_env("SMTP_USE_SSL", False)
-    SMTP_USE_STARTTLS = _boolean_from_env("SMTP_USE_STARTTLS", True)
-    SMTP_TIMEOUT_SECONDS = _positive_int_from_env("SMTP_TIMEOUT_SECONDS", 10)
+    SMTP_USE_SSL = _read_setting(_boolean_from_env, "SMTP_USE_SSL", False)
+    SMTP_USE_STARTTLS = _read_setting(_boolean_from_env, "SMTP_USE_STARTTLS", True)
+    SMTP_TIMEOUT_SECONDS = _read_setting(
+        _positive_int_from_env, "SMTP_TIMEOUT_SECONDS", 10
+    )
 
     # Security mail is a durable database job. Local file/memory delivery can
     # run inline for a one-process developer experience; production must turn
     # this off and run the dedicated worker so SMTP latency cannot become an
     # account-enumeration side channel in authentication requests.
-    SECURITY_EMAIL_INLINE_DELIVERY = _boolean_from_env(
+    SECURITY_EMAIL_INLINE_DELIVERY = _read_setting(
+        _boolean_from_env,
         "SECURITY_EMAIL_INLINE_DELIVERY",
         APPLICATION_ENVIRONMENT != "production",
     )
-    SECURITY_EMAIL_LEASE_SECONDS = _positive_int_from_env(
-        "SECURITY_EMAIL_LEASE_SECONDS", 300
+    SECURITY_EMAIL_LEASE_SECONDS = _read_setting(
+        _positive_int_from_env, "SECURITY_EMAIL_LEASE_SECONDS", 300
     )
-    SECURITY_EMAIL_MAX_ATTEMPTS = _positive_int_from_env(
-        "SECURITY_EMAIL_MAX_ATTEMPTS", 5
+    SECURITY_EMAIL_MAX_ATTEMPTS = _read_setting(
+        _positive_int_from_env, "SECURITY_EMAIL_MAX_ATTEMPTS", 5
     )
-    SECURITY_EMAIL_RETRY_BASE_SECONDS = _positive_int_from_env(
-        "SECURITY_EMAIL_RETRY_BASE_SECONDS", 30
+    SECURITY_EMAIL_RETRY_BASE_SECONDS = _read_setting(
+        _positive_int_from_env, "SECURITY_EMAIL_RETRY_BASE_SECONDS", 30
     )
-    SECURITY_EMAIL_RETRY_MAX_SECONDS = _positive_int_from_env(
-        "SECURITY_EMAIL_RETRY_MAX_SECONDS", 3600
+    SECURITY_EMAIL_RETRY_MAX_SECONDS = _read_setting(
+        _positive_int_from_env, "SECURITY_EMAIL_RETRY_MAX_SECONDS", 3600
     )
-    SECURITY_EMAIL_WORKER_BATCH_SIZE = _positive_int_from_env(
-        "SECURITY_EMAIL_WORKER_BATCH_SIZE", 100
+    SECURITY_EMAIL_WORKER_BATCH_SIZE = _read_setting(
+        _positive_int_from_env, "SECURITY_EMAIL_WORKER_BATCH_SIZE", 100
     )
-    SECURITY_EMAIL_WORKER_POLL_SECONDS = _positive_int_from_env(
-        "SECURITY_EMAIL_WORKER_POLL_SECONDS", 2
+    SECURITY_EMAIL_WORKER_POLL_SECONDS = _read_setting(
+        _positive_int_from_env, "SECURITY_EMAIL_WORKER_POLL_SECONDS", 2
     )
 
     JSON_SORT_KEYS = False
+
+    CONFIGURATION_ERRORS = tuple(_configuration_errors)

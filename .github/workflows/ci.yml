@@ -88,6 +88,23 @@ jobs:
           assert client.get('/api/files').status_code == 401
           PY
 
+      - name: Verify incomplete Vercel setup is a safe 503 on a cold import
+        env:
+          VERCEL: "1"
+          APP_ENV: "invalid"
+          MAX_CONTENT_LENGTH: "invalid"
+          PYTHON_DOTENV_DISABLED: "1"
+        run: |
+          .venv/bin/python - <<'PY'
+          from run import app
+
+          client = app.test_client()
+          assert client.get('/').status_code == 503
+          assert client.get('/healthz').status_code == 503
+          assert client.post('/api/files').status_code == 503
+          assert not app.extensions
+          PY
+
   security:
     name: Static and dependency security checks
     runs-on: ubuntu-latest
@@ -112,7 +129,7 @@ jobs:
         run: python -m ruff check .
 
       - name: Run static security analysis
-        run: python -m bandit -q -c pyproject.toml -r app
+        run: python -m bandit -q -c pyproject.toml -r app deployment.py check_deployment.py run.py
 
       - name: Audit resolved runtime dependencies
         run: python -m pip_audit -r requirements-dev.txt
