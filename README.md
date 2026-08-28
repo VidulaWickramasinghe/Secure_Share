@@ -92,6 +92,11 @@ SMTP, and a separate email worker. The Vercel entrypoint is configured, but full
 production compatibility is **not complete**. Do not use the development server
 for production.
 
+For `FUNCTION_INVOCATION_FAILED` or a **setup required** response on Vercel,
+follow the [deployment troubleshooting guide](docs/vercel-deployment.md).
+It distinguishes a successful build from a working application and includes a
+command that reports configuration problems together without printing secrets.
+
 See the [technical guide](docs/technical-guide.md) for
 [architecture](docs/technical-guide.md#architecture),
 [API endpoints](docs/technical-guide.md#api-reference),

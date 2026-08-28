@@ -350,12 +350,15 @@ def _pre_auth_peer_limit(
     return cast(ViewFunction, limited)
 
 
-def init_rate_limiting(app: Flask) -> None:
-    """Validate secure deployment settings and initialize Flask-Limiter."""
+def validate_rate_limit_configuration(app: Flask) -> None:
+    """Validate settings without creating a storage client."""
 
     environment = str(app.config.get("APP_ENV", "development")).strip().lower()
     storage_uri = str(app.config.get("RATELIMIT_STORAGE_URI") or "").strip()
-    storage_scheme = urlsplit(storage_uri).scheme.lower()
+    try:
+        storage_scheme = urlsplit(storage_uri).scheme.lower()
+    except ValueError as exc:
+        raise RuntimeError("RATELIMIT_STORAGE_URI must be a valid URI") from exc
 
     if not storage_uri or not storage_scheme:
         raise RuntimeError("RATELIMIT_STORAGE_URI must be configured")
@@ -408,6 +411,11 @@ def init_rate_limiting(app: Flask) -> None:
         if not parsed_limits:
             raise RuntimeError(f"{config_name} must define at least one rate limit")
 
+
+def init_rate_limiting(app: Flask) -> None:
+    """Validate secure deployment settings and initialize Flask-Limiter."""
+
+    validate_rate_limit_configuration(app)
     # These settings are intentionally not operator-tunable: backend failures
     # must reject requests, never silently disable or localize enforcement.
     app.config["RATELIMIT_ENABLED"] = True

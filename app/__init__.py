@@ -3,10 +3,8 @@
 from __future__ import annotations
 
 import os
-import secrets
 import time
 from pathlib import Path
-from urllib.parse import urlsplit
 
 import click
 from flask import Flask, current_app, jsonify, request
@@ -21,7 +19,7 @@ from app.database import (
 )
 from app.extensions import db, migrate
 from app.rate_limits import init_rate_limiting
-from app.services.password_policy import validate_password_policy_configuration
+from app.validation import validate_application_configuration
 
 
 def create_app(test_config: dict | None = None) -> Flask:
@@ -36,85 +34,7 @@ def create_app(test_config: dict | None = None) -> Flask:
     if test_config:
         app.config.update(test_config)
 
-    application_environment = str(
-        app.config.get("APP_ENV", "development")
-    ).strip().lower()
-    if application_environment not in {"development", "test", "production"}:
-        raise RuntimeError("APP_ENV must be development, test, or production")
-    if (
-        application_environment == "production"
-        and app.config.get("BROWSER_COOKIE_SECURE") is not True
-    ):
-        raise RuntimeError("Production requires BROWSER_COOKIE_SECURE=true")
-    mail_backend = str(app.config.get("MAIL_BACKEND", "")).lower()
-    if mail_backend not in {"memory", "file", "smtp", "disabled"}:
-        raise RuntimeError("MAIL_BACKEND must be memory, file, smtp, or disabled")
-    if app.config.get("SMTP_USE_SSL") and app.config.get("SMTP_USE_STARTTLS"):
-        raise RuntimeError("SMTP_USE_SSL and SMTP_USE_STARTTLS cannot both be true")
-    if application_environment == "production":
-        secret_key = app.config.get("SECRET_KEY")
-        token_pepper = app.config.get("ACCOUNT_TOKEN_PEPPER")
-        if not isinstance(secret_key, str) or len(secret_key) < 32:
-            raise RuntimeError("Production requires a stable high-entropy SECRET_KEY")
-        if (
-            not isinstance(token_pepper, str)
-            or len(token_pepper) < 32
-            or secrets.compare_digest(token_pepper, secret_key)
-        ):
-            raise RuntimeError(
-                "Production requires a distinct high-entropy ACCOUNT_TOKEN_PEPPER"
-            )
-        public_url = urlsplit(str(app.config.get("PUBLIC_BASE_URL", "")))
-        if (
-            public_url.scheme != "https"
-            or not public_url.hostname
-            or public_url.username is not None
-            or public_url.password is not None
-            or public_url.path not in {"", "/"}
-            or public_url.query
-            or public_url.fragment
-        ):
-            raise RuntimeError(
-                "Production requires PUBLIC_BASE_URL to be an HTTPS origin"
-            )
-        if mail_backend != "smtp" or not app.config.get("SMTP_HOST"):
-            raise RuntimeError("Production requires a configured SMTP mail backend")
-        if not (
-            bool(app.config.get("SMTP_USE_SSL"))
-            ^ bool(app.config.get("SMTP_USE_STARTTLS"))
-        ):
-            raise RuntimeError(
-                "Production SMTP requires exactly one encrypted TLS mode"
-            )
-        if app.config.get("SECURITY_EMAIL_INLINE_DELIVERY") is not False:
-            raise RuntimeError(
-                "Production requires SECURITY_EMAIL_INLINE_DELIVERY=false"
-            )
-        smtp_timeout = int(app.config["SMTP_TIMEOUT_SECONDS"])
-        email_lease = int(app.config["SECURITY_EMAIL_LEASE_SECONDS"])
-        if email_lease < smtp_timeout * 10:
-            raise RuntimeError(
-                "SECURITY_EMAIL_LEASE_SECONDS must be at least ten times "
-                "SMTP_TIMEOUT_SECONDS in production"
-            )
-        if float(app.config["PASSWORD_RESET_MINIMUM_RESPONSE_SECONDS"]) < 0.25:
-            raise RuntimeError(
-                "Production requires PASSWORD_RESET_MINIMUM_RESPONSE_SECONDS "
-                "to be at least 0.25"
-            )
-        rate_key_secret = app.config.get("RATE_LIMIT_KEY_SECRET")
-        if not isinstance(rate_key_secret, str) or any(
-            secrets.compare_digest(rate_key_secret, existing_secret)
-            for existing_secret in (secret_key, token_pepper)
-        ):
-            raise RuntimeError(
-                "Production requires a distinct high-entropy RATE_LIMIT_KEY_SECRET"
-            )
-        # Flask validates the Host header before routing. The public email-link
-        # origin is also the sole browser origin accepted in production.
-        app.config["TRUSTED_HOSTS"] = [public_url.hostname]
-
-    validate_password_policy_configuration(app)
+    validate_application_configuration(app)
     init_rate_limiting(app)
 
     # Flask's default development SQLite URL lives below instance_path. Flask

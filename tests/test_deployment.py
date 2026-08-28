@@ -3,6 +3,11 @@
 from __future__ import annotations
 
 import importlib.util
+import json
+import os
+import secrets
+import subprocess
+import sys
 import tomllib
 from pathlib import Path
 
@@ -16,6 +21,7 @@ from app.config import (
     _nonnegative_float_from_env,
     _positive_int_from_env,
 )
+from deployment import DeploymentConfigurationError, create_wsgi_application
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -169,3 +175,162 @@ def test_vercel_entrypoint_exports_the_application_without_starting_a_server(
     client = application.test_client()
     assert client.get("/").status_code == 200
     assert client.get("/api/files").status_code == 401
+
+
+def test_configuration_reports_multiple_failures_before_filesystem_writes(
+    app, monkeypatch
+):
+    config = dict(app.config)
+    config.update(
+        APP_ENV="production",
+        SECRET_KEY=None,
+        ACCOUNT_TOKEN_PEPPER=None,
+        RATE_LIMIT_KEY_SECRET=None,
+        BROWSER_COOKIE_SECURE=False,
+        PUBLIC_BASE_URL="https://[invalid",
+        MAIL_BACKEND="file",
+        SMTP_HOST=None,
+        PASSWORD_BLOCKLIST_PATH=None,
+    )
+
+    def reject_write(*args, **kwargs):
+        raise AssertionError("Invalid configuration must not write to the filesystem")
+
+    monkeypatch.setattr(Path, "mkdir", reject_write)
+    with pytest.raises(DeploymentConfigurationError) as failure:
+        create_app(config)
+    for name in (
+        "SECRET_KEY",
+        "ACCOUNT_TOKEN_PEPPER",
+        "RATE_LIMIT_KEY_SECRET",
+        "PUBLIC_BASE_URL",
+        "BROWSER_COOKIE_SECURE",
+        "SMTP_HOST",
+        "PASSWORD_BLOCKLIST_PATH",
+        "RATELIMIT_STORAGE_URI",
+    ):
+        assert name in str(failure.value)
+    assert "[invalid" not in str(failure.value)
+
+
+@pytest.mark.parametrize(
+    "invalid_settings",
+    [
+        {},
+        {"APP_ENV": "invalid", "MAX_CONTENT_LENGTH": "sixteen", "SMTP_PORT": "bad"},
+        {"APP_ENV": "development"},
+        {"APP_ENV": "test"},
+        {
+            "PUBLIC_BASE_URL": "https://[invalid",
+            "RATELIMIT_STORAGE_URI": "redis://[invalid",
+        },
+    ],
+)
+def test_fresh_vercel_import_returns_503_without_leaking_configuration(
+    invalid_settings,
+):
+    # A separate interpreter reproduces Vercel's cold import (including Config)
+    # and cannot accidentally reuse pytest's already imported app or test keys.
+    short_secret = secrets.token_hex(8)
+    short_pepper = secrets.token_hex(8)
+    environment = {
+        "PATH": os.environ.get("PATH", ""),
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHON_DOTENV_DISABLED": "1",
+        "VERCEL": "1",
+        "APP_ENV": "",
+        "SECRET_KEY": short_secret,
+        "ACCOUNT_TOKEN_PEPPER": short_pepper,
+        "PASSWORD_BLOCKLIST_PATH": str(PROJECT_ROOT / short_secret),
+        "MAX_CONTENT_LENGTH": "",
+        "DATABASE_URL": "sqlite:///:memory:",
+        **invalid_settings,
+    }
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            """
+import json
+from run import app
+client = app.test_client()
+responses = []
+for method, path in [("GET", "/"), ("GET", "/healthz"),
+                     ("POST", "/api/auth/register"), ("POST", "/api/files"),
+                     ("GET", "/api/files/private-id/download"),
+                     ("GET", "/static/storage/private-file"), ("HEAD", "/")]:
+    response = client.open(path, method=method)
+    responses.append({"status": response.status_code,
+                      "body": response.get_data(as_text=True),
+                      "headers": dict(response.headers)})
+print(json.dumps({"responses": responses, "extensions": list(app.extensions)}))
+""",
+        ],
+        cwd=PROJECT_ROOT,
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=20,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout)
+    assert payload["extensions"] == []
+    for response in payload["responses"]:
+        assert response["status"] == 503
+        assert response["headers"]["Cache-Control"] == "no-store"
+        assert response["headers"]["X-Content-Type-Options"] == "nosniff"
+        assert "Set-Cookie" not in response["headers"]
+        assert "SECRET_KEY" not in response["body"]
+        assert "Traceback" not in response["body"]
+    for secret in (short_secret, short_pepper):
+        assert secret not in result.stdout + result.stderr
+    assert "UPLOAD_FOLDER" in result.stderr
+    assert "email-worker" in result.stderr
+    if "SMTP_PORT" in invalid_settings:
+        assert "SMTP_PORT must be an integer" in result.stderr
+        assert "MAX_CONTENT_LENGTH must be an integer" in result.stderr
+        assert "APP_ENV must be" in result.stderr
+
+
+def test_configuration_check_exits_nonzero_without_claiming_readiness():
+    result = subprocess.run(
+        [sys.executable, "check_deployment.py"],
+        cwd=PROJECT_ROOT,
+        env={
+            "PATH": os.environ.get("PATH", ""),
+            "VERCEL": "1",
+            "PYTHON_DOTENV_DISABLED": "1",
+        },
+        capture_output=True,
+        text=True,
+        timeout=20,
+        check=False,
+    )
+    assert result.returncode == 1
+    assert "SECRET_KEY" in result.stderr
+    assert "DATABASE_URL" in result.stderr
+    assert "UPLOAD_FOLDER" in result.stderr
+    assert "passed" not in result.stdout
+
+
+def test_local_configuration_failures_are_not_hidden(monkeypatch):
+    monkeypatch.delenv("VERCEL", raising=False)
+
+    def reject_configuration():
+        raise DeploymentConfigurationError(["SECRET_KEY is required"])
+
+    monkeypatch.setattr("app.create_app", reject_configuration)
+    with pytest.raises(DeploymentConfigurationError, match="SECRET_KEY"):
+        create_wsgi_application()
+
+
+def test_unexpected_startup_errors_are_not_mislabeled_as_configuration(monkeypatch):
+    monkeypatch.setenv("VERCEL", "1")
+
+    def broken_code():
+        raise TypeError("unexpected programming error")
+
+    monkeypatch.setattr("app.create_app", broken_code)
+    with pytest.raises(TypeError, match="unexpected programming error"):
+        create_wsgi_application()

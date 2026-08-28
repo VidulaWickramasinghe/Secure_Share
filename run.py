@@ -1,9 +1,9 @@
 """WSGI entrypoint for deployment and local development of Secure Share."""
 
-from app import create_app
+from deployment import create_wsgi_application
 
 
-app = create_app()
+app = create_wsgi_application()
 
 
 if __name__ == "__main__":
