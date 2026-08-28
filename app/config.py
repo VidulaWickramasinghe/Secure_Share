@@ -17,7 +17,7 @@ def _positive_int_from_env(name: str, default: int) -> int:
     """Read a positive integer without silently accepting unsafe values."""
 
     raw_value = os.getenv(name)
-    if raw_value is None:
+    if raw_value is None or not raw_value.strip():
         return default
 
     try:
@@ -34,7 +34,7 @@ def _boolean_from_env(name: str, default: bool) -> bool:
     """Read an explicit boolean without treating arbitrary text as false."""
 
     raw_value = os.getenv(name)
-    if raw_value is None:
+    if raw_value is None or not raw_value.strip():
         return default
 
     normalized = raw_value.strip().lower()
@@ -49,7 +49,7 @@ def _nonnegative_float_from_env(name: str, default: float) -> float:
     """Read a finite, non-negative duration."""
 
     raw_value = os.getenv(name)
-    if raw_value is None:
+    if raw_value is None or not raw_value.strip():
         return default
     try:
         value = float(raw_value)
@@ -61,7 +61,10 @@ def _nonnegative_float_from_env(name: str, default: float) -> float:
 
 
 def _application_environment() -> str:
-    value = os.getenv("APP_ENV", "development").strip().lower()
+    # Empty dashboard entries are unset settings. A hosted deployment must
+    # still default to production validation, never development safeguards.
+    default = "production" if os.getenv("VERCEL") == "1" else "development"
+    value = (os.getenv("APP_ENV") or "").strip().lower() or default
     if value not in {"development", "test", "production"}:
         raise ValueError("APP_ENV must be development, test, or production")
     return value
@@ -100,12 +103,16 @@ class Config:
 
     # An ephemeral fallback is safe for local startup and avoids shipping a
     # shared predictable secret. Production must provide a stable SECRET_KEY.
-    SECRET_KEY = os.getenv("SECRET_KEY") or secrets.token_hex(32)
+    SECRET_KEY = os.getenv("SECRET_KEY") or (
+        None if APPLICATION_ENVIRONMENT == "production" else secrets.token_hex(32)
+    )
     APP_ENV = APPLICATION_ENVIRONMENT
     SQLALCHEMY_DATABASE_URI = _database_url()
     SQLALCHEMY_TRACK_MODIFICATIONS = False
 
-    UPLOAD_FOLDER = os.getenv("UPLOAD_FOLDER", str(PROJECT_ROOT / "storage"))
+    UPLOAD_FOLDER = os.getenv("UPLOAD_FOLDER", "").strip() or str(
+        PROJECT_ROOT / "storage"
+    )
     MAX_CONTENT_LENGTH = _positive_int_from_env(
         "MAX_CONTENT_LENGTH", 16 * 1024 * 1024
     )
@@ -127,7 +134,7 @@ class Config:
     # stable, independently generated HMAC key.
     RATELIMIT_STORAGE_URI = os.getenv("RATELIMIT_STORAGE_URI") or "memory://"
     RATE_LIMIT_KEY_SECRET = os.getenv("RATE_LIMIT_KEY_SECRET") or None
-    RATELIMIT_KEY_PREFIX = os.getenv("RATELIMIT_KEY_PREFIX", "secure-share")
+    RATELIMIT_KEY_PREFIX = os.getenv("RATELIMIT_KEY_PREFIX") or "secure-share"
     RATELIMIT_STRATEGY = "fixed-window"
     RATELIMIT_HEADERS_ENABLED = True
     RATELIMIT_HEADER_RETRY_AFTER_VALUE = "delta-seconds"
@@ -181,10 +188,12 @@ class Config:
 
     # The file backend is intentionally development-only and writes private
     # RFC 5322 messages below instance/. Production validation requires SMTP.
-    PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "http://127.0.0.1:5000")
-    MAIL_BACKEND = os.getenv("MAIL_BACKEND", "file").strip().lower()
-    MAIL_FROM_ADDRESS = os.getenv("MAIL_FROM_ADDRESS", "no-reply@secure-share.local")
-    MAIL_FILE_OUTBOX = os.getenv("MAIL_FILE_OUTBOX", "mail-outbox")
+    PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL") or "http://127.0.0.1:5000"
+    MAIL_BACKEND = os.getenv("MAIL_BACKEND", "").strip().lower() or (
+        "smtp" if APPLICATION_ENVIRONMENT == "production" else "file"
+    )
+    MAIL_FROM_ADDRESS = os.getenv("MAIL_FROM_ADDRESS") or "no-reply@secure-share.local"
+    MAIL_FILE_OUTBOX = os.getenv("MAIL_FILE_OUTBOX", "").strip() or "mail-outbox"
     SMTP_HOST = os.getenv("SMTP_HOST") or None
     SMTP_PORT = _positive_int_from_env("SMTP_PORT", 587)
     SMTP_USERNAME = os.getenv("SMTP_USERNAME") or None
