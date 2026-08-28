@@ -6,8 +6,27 @@ import importlib.util
 import tomllib
 from pathlib import Path
 
+from packaging.specifiers import SpecifierSet
+
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_vercel_project_declares_all_runtime_dependencies():
+    with (PROJECT_ROOT / "pyproject.toml").open("rb") as configuration_file:
+        project = tomllib.load(configuration_file)["project"]
+
+    requirements = {
+        line.strip()
+        for line in (PROJECT_ROOT / "requirements.txt").read_text().splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    }
+    # Vercel installs from pyproject.toml, while local pip/CI users still use
+    # requirements.txt. Both installation paths must have the same runtime.
+    assert set(project["dependencies"]) == requirements
+
+    python_version = (PROJECT_ROOT / ".python-version").read_text().strip()
+    assert python_version in SpecifierSet(project["requires-python"])
 
 
 def test_vercel_entrypoint_exports_the_application_without_starting_a_server(

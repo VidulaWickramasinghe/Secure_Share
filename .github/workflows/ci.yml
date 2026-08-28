@@ -46,6 +46,48 @@ jobs:
       - name: Run test suite
         run: python -m pytest
 
+  vercel-dependencies:
+    name: Vercel dependency installation
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up deployment Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version-file: .python-version
+
+      - name: Install Vercel's uv version
+        run: python -m pip install uv==0.10.11
+
+      - name: Validate the deployment lockfile
+        run: uv lock --check
+
+      - name: Install only locked production dependencies
+        run: uv sync --frozen --no-dev --no-editable
+
+      - name: Check installed dependency compatibility
+        run: uv pip check
+
+      - name: Import the WSGI app in the clean deployment environment
+        env:
+          APP_ENV: test
+          DATABASE_URL: "sqlite:///:memory:"
+          MAIL_BACKEND: memory
+        run: |
+          .venv/bin/python - <<'PY'
+          from flask import Flask
+          from run import app
+
+          assert isinstance(app, Flask)
+          client = app.test_client()
+          assert client.get('/').status_code == 200
+          assert client.get('/static/css/style.css').status_code == 200
+          assert client.get('/api/files').status_code == 401
+          PY
+
   security:
     name: Static and dependency security checks
     runs-on: ubuntu-latest
