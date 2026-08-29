@@ -88,9 +88,11 @@ security, and deployment-dependency checks.
 ## Deployment and documentation
 
 Production needs HTTPS, PostgreSQL, private persistent file storage, shared Redis,
-SMTP, and a separate email worker. The Vercel entrypoint is configured, but full
-production compatibility is **not complete**. Do not use the development server
-for production.
+SMTP, and scheduled email processing. Vercel deployments use private Vercel Blob
+storage and an authenticated endpoint for the durable email queue. These services
+must be configured and tested before the site is operational. Local/server
+deployments can still use private filesystem storage and the CLI email worker.
+Do not use the development server for production.
 
 For `FUNCTION_INVOCATION_FAILED` or a **setup required** response on Vercel,
 follow the [deployment troubleshooting guide](docs/vercel-deployment.md).

@@ -39,24 +39,29 @@ def create_app(test_config: dict | None = None) -> Flask:
 
     # Flask's default development SQLite URL lives below instance_path. Flask
     # intentionally does not create this directory for us.
-    Path(app.instance_path).mkdir(mode=0o700, parents=True, exist_ok=True)
+    if (
+        str(app.config["SQLALCHEMY_DATABASE_URI"]).startswith("sqlite:")
+        or app.config["MAIL_BACKEND"] == "file"
+    ):
+        Path(app.instance_path).mkdir(mode=0o700, parents=True, exist_ok=True)
 
-    upload_folder = Path(app.config["UPLOAD_FOLDER"]).expanduser()
-    if not upload_folder.is_absolute():
-        upload_folder = Path(app.root_path).parent / upload_folder
-    upload_folder = upload_folder.resolve()
-    if app.static_folder:
-        static_folder = Path(app.static_folder).resolve()
-        if upload_folder == static_folder or static_folder in upload_folder.parents:
-            raise RuntimeError(
-                "UPLOAD_FOLDER must not be inside Flask's static directory."
-            )
-    upload_folder.mkdir(mode=0o700, parents=True, exist_ok=True)
-    if os.name == "posix":
-        # Existing directories ignore mkdir's mode, so tighten a checked-out or
-        # pre-provisioned storage directory as well.
-        upload_folder.chmod(0o700)
-    app.config["UPLOAD_FOLDER"] = str(upload_folder)
+    if app.config["FILE_STORAGE_BACKEND"] == "filesystem":
+        upload_folder = Path(app.config["UPLOAD_FOLDER"]).expanduser()
+        if not upload_folder.is_absolute():
+            upload_folder = Path(app.root_path).parent / upload_folder
+        upload_folder = upload_folder.resolve()
+        if app.static_folder:
+            static_folder = Path(app.static_folder).resolve()
+            if upload_folder == static_folder or static_folder in upload_folder.parents:
+                raise RuntimeError(
+                    "UPLOAD_FOLDER must not be inside Flask's static directory."
+                )
+        upload_folder.mkdir(mode=0o700, parents=True, exist_ok=True)
+        if os.name == "posix":
+            # Existing directories ignore mkdir's mode, so tighten a checked-out or
+            # pre-provisioned storage directory as well.
+            upload_folder.chmod(0o700)
+        app.config["UPLOAD_FOLDER"] = str(upload_folder)
 
     db.init_app(app)
     migrate.init_app(
@@ -72,12 +77,14 @@ def create_app(test_config: dict | None = None) -> Flask:
     from app import models  # noqa: F401
     from app.routes.auth import auth_bp
     from app.routes.files import files_bp
+    from app.routes.internal import internal_bp
     from app.routes.permissions import permissions_bp
     from app.routes.web import web_bp
 
     app.register_blueprint(web_bp)
     app.register_blueprint(auth_bp)
     app.register_blueprint(files_bp)
+    app.register_blueprint(internal_bp)
     app.register_blueprint(permissions_bp)
 
     @app.after_request

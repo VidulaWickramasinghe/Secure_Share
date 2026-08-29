@@ -86,6 +86,21 @@ def _database_url() -> str:
     return f"sqlite:///{database_path}"
 
 
+def _public_base_url() -> str:
+    configured = os.getenv("PUBLIC_BASE_URL", "").strip()
+    if configured:
+        return configured
+    if os.getenv("VERCEL") == "1":
+        name = (
+            "VERCEL_PROJECT_PRODUCTION_URL"
+            if os.getenv("VERCEL_ENV") == "production" else "VERCEL_URL"
+        )
+        hostname = os.getenv(name, "").strip()
+        if hostname:
+            return f"https://{hostname}"
+    return "http://127.0.0.1:5000"
+
+
 _configuration_errors: list[str] = []
 
 
@@ -127,8 +142,20 @@ class Config:
     UPLOAD_FOLDER = os.getenv("UPLOAD_FOLDER", "").strip() or str(
         PROJECT_ROOT / "storage"
     )
+    FILE_STORAGE_BACKEND = os.getenv("FILE_STORAGE_BACKEND", "").strip().lower() or (
+        "vercel_blob" if os.getenv("VERCEL") == "1" else "filesystem"
+    )
+    BLOB_READ_WRITE_TOKEN = os.getenv("BLOB_READ_WRITE_TOKEN") or None
     MAX_CONTENT_LENGTH = _read_setting(
-        _positive_int_from_env, "MAX_CONTENT_LENGTH", 16 * 1024 * 1024
+        _positive_int_from_env,
+        "MAX_CONTENT_LENGTH",
+        4 * 1024 * 1024 if os.getenv("VERCEL") == "1" else 16 * 1024 * 1024,
+    )
+    # Leave room for multipart form framing below Vercel's request body limit.
+    MAX_FILE_SIZE = (
+        min(MAX_CONTENT_LENGTH - 64 * 1024, 4 * 1024 * 1024 - 64 * 1024)
+        if os.getenv("VERCEL") == "1"
+        else None
     )
     SESSION_LIFETIME_SECONDS = _read_setting(
         _positive_int_from_env, "SESSION_LIFETIME_SECONDS", 24 * 60 * 60
@@ -185,7 +212,10 @@ class Config:
 
     # The bundled whole-password blocklist is always active. Operators may
     # extend it with an ASCII file containing one SHA-256 hex digest per line.
-    PASSWORD_BLOCKLIST_PATH = os.getenv("PASSWORD_BLOCKLIST_PATH") or None
+    PASSWORD_BLOCKLIST_PATH = os.getenv("PASSWORD_BLOCKLIST_PATH", "").strip() or (
+        str(PROJECT_ROOT / "app" / "data" / "production-password-blocklist.sha256")
+        if APPLICATION_ENVIRONMENT == "production" else None
+    )
 
     # Account-action links contain 256 bits of randomness. Only a
     # purpose-separated HMAC digest is retained in the database. A distinct,
@@ -206,7 +236,7 @@ class Config:
 
     # The file backend is intentionally development-only and writes private
     # RFC 5322 messages below instance/. Production validation requires SMTP.
-    PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL") or "http://127.0.0.1:5000"
+    PUBLIC_BASE_URL = _public_base_url()
     MAIL_BACKEND = os.getenv("MAIL_BACKEND", "").strip().lower() or (
         "smtp" if APPLICATION_ENVIRONMENT == "production" else "file"
     )
@@ -248,6 +278,12 @@ class Config:
     )
     SECURITY_EMAIL_WORKER_POLL_SECONDS = _read_setting(
         _positive_int_from_env, "SECURITY_EMAIL_WORKER_POLL_SECONDS", 2
+    )
+    # A scheduler may trigger a bounded batch over HTTPS instead of requiring a
+    # continuously running worker. Never expose this credential to the browser.
+    CRON_SECRET = os.getenv("CRON_SECRET") or None
+    SECURITY_EMAIL_HTTP_BATCH_SIZE = _read_setting(
+        _positive_int_from_env, "SECURITY_EMAIL_HTTP_BATCH_SIZE", 1
     )
 
     JSON_SORT_KEYS = False

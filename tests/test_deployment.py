@@ -20,11 +20,29 @@ from app.config import (
     _boolean_from_env,
     _nonnegative_float_from_env,
     _positive_int_from_env,
+    _public_base_url,
 )
 from deployment import DeploymentConfigurationError, create_wsgi_application
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+
+@pytest.mark.parametrize(("environment", "expected"), [
+    ("production", "https://secure-share.example"),
+    ("preview", "https://preview.example"),
+])
+def test_default_public_origin_stays_in_its_deployment_environment(
+    monkeypatch, environment, expected,
+):
+    monkeypatch.setenv("VERCEL", "1")
+    monkeypatch.setenv("VERCEL_ENV", environment)
+    monkeypatch.setenv("PUBLIC_BASE_URL", "")
+    monkeypatch.setenv("VERCEL_PROJECT_PRODUCTION_URL", "secure-share.example")
+    monkeypatch.setenv("VERCEL_URL", "preview.example")
+    assert _public_base_url() == expected
+    monkeypatch.setenv("PUBLIC_BASE_URL", "https://custom.example")
+    assert _public_base_url() == "https://custom.example"
 
 
 @pytest.mark.parametrize("empty_value", [None, "", " \t\n"])
@@ -285,7 +303,7 @@ print(json.dumps({"responses": responses, "extensions": list(app.extensions)}))
         assert "Traceback" not in response["body"]
     for secret in (short_secret, short_pepper):
         assert secret not in result.stdout + result.stderr
-    assert "UPLOAD_FOLDER" in result.stderr
+    assert "BLOB_READ_WRITE_TOKEN" in result.stderr
     assert "email-worker" in result.stderr
     if "SMTP_PORT" in invalid_settings:
         assert "SMTP_PORT must be an integer" in result.stderr
@@ -310,7 +328,7 @@ def test_configuration_check_exits_nonzero_without_claiming_readiness():
     assert result.returncode == 1
     assert "SECRET_KEY" in result.stderr
     assert "DATABASE_URL" in result.stderr
-    assert "UPLOAD_FOLDER" in result.stderr
+    assert "BLOB_READ_WRITE_TOKEN" in result.stderr
     assert "passed" not in result.stdout
 
 

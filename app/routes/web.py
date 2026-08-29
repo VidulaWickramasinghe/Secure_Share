@@ -57,7 +57,10 @@ def dashboard():
     return render_template(
         "dashboard.html",
         page_name="dashboard",
-        max_upload_bytes=current_app.config["MAX_CONTENT_LENGTH"],
+        max_upload_bytes=(
+            current_app.config.get("MAX_FILE_SIZE")
+            or current_app.config["MAX_CONTENT_LENGTH"]
+        ),
     )
 
 

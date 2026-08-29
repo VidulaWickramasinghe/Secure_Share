@@ -27,6 +27,30 @@ def validate_application_configuration(app) -> None:
         problems.append("MAIL_BACKEND must be memory, file, smtp, or disabled")
     if config.get("SMTP_USE_SSL") and config.get("SMTP_USE_STARTTLS"):
         problems.append("SMTP_USE_SSL and SMTP_USE_STARTTLS cannot both be true")
+    storage_backend = config.get("FILE_STORAGE_BACKEND")
+    if storage_backend not in {"filesystem", "vercel_blob"}:
+        problems.append("FILE_STORAGE_BACKEND must be filesystem or vercel_blob")
+    if (
+        storage_backend == "vercel_blob"
+        and not str(config.get("BLOB_READ_WRITE_TOKEN") or "").strip()
+    ):
+        problems.append("Private Blob storage requires BLOB_READ_WRITE_TOKEN")
+    cron_secret = config.get("CRON_SECRET")
+    if cron_secret and (
+        not isinstance(cron_secret, str)
+        or len(cron_secret.strip()) < 32
+        or cron_secret
+        in (
+            config.get("SECRET_KEY"),
+            config.get("ACCOUNT_TOKEN_PEPPER"),
+            config.get("RATE_LIMIT_KEY_SECRET"),
+        )
+    ):
+        problems.append(
+            "CRON_SECRET must be an independent secret of at least 32 characters"
+        )
+    if config["SECURITY_EMAIL_HTTP_BATCH_SIZE"] > 3:
+        problems.append("SECURITY_EMAIL_HTTP_BATCH_SIZE must be between 1 and 3")
 
     if environment == "production":
         if config.get("BROWSER_COOKIE_SECURE") is not True:
@@ -124,18 +148,29 @@ def validate_application_configuration(app) -> None:
             problems.append(
                 "Vercel requires DATABASE_URL for an external PostgreSQL database"
             )
-        # This repository currently stores uploaded bytes on the filesystem.
-        # Vercel's /tmp is ephemeral, not a persistent storage backend. Refuse
-        # to advertise successful uploads that disappear on a later request.
-        problems.append(
-            "Vercel cannot persist the current UPLOAD_FOLDER filesystem backend. "
-            "Implement private object storage, or host the backend on a server "
-            "with a private persistent volume; /tmp is not a production fix"
-        )
-        problems.append(
-            "Production needs a separately hosted email-worker process; "
-            "Vercel does not run this repository's persistent worker"
-        )
+        if storage_backend != "vercel_blob":
+            problems.append(
+                "Vercel requires FILE_STORAGE_BACKEND=vercel_blob; "
+                "UPLOAD_FOLDER and /tmp cannot persist private uploads"
+            )
+        if not cron_secret:
+            problems.append(
+                "Vercel requires CRON_SECRET for the authenticated email-worker endpoint"
+            )
+        if config["SECURITY_EMAIL_HTTP_BATCH_SIZE"] != 1:
+            problems.append("Vercel requires SECURITY_EMAIL_HTTP_BATCH_SIZE=1")
+        if config["SMTP_TIMEOUT_SECONDS"] > 10:
+            problems.append("Vercel requires SMTP_TIMEOUT_SECONDS to be at most 10")
+        if not 128 * 1024 <= config["MAX_CONTENT_LENGTH"] <= 4 * 1024 * 1024:
+            problems.append(
+                "Vercel requires MAX_CONTENT_LENGTH between 131072 and 4194304"
+            )
+        if not isinstance(config.get("MAX_FILE_SIZE"), int) or not (
+            0 < config["MAX_FILE_SIZE"] <= config["MAX_CONTENT_LENGTH"] - 64 * 1024
+        ):
+            problems.append(
+                "Vercel requires MAX_FILE_SIZE below the multipart request limit"
+            )
 
     if problems:
         raise DeploymentConfigurationError(problems)

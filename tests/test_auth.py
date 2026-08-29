@@ -786,3 +786,34 @@ def test_production_restricts_hosts_and_sends_hsts(tmp_path):
         "max-age=31536000; includeSubDomains"
     )
     assert rejected.status_code == 400
+
+
+def test_configured_vercel_app_starts_without_writing_to_the_bundle(
+    tmp_path, monkeypatch
+):
+    import secrets
+    from pathlib import Path
+
+    config = _production_config(tmp_path)
+    config.update(
+        SQLALCHEMY_DATABASE_URI="postgresql+psycopg://localhost/unused_startup_test",
+        FILE_STORAGE_BACKEND="vercel_blob",
+        BLOB_READ_WRITE_TOKEN=secrets.token_urlsafe(32),
+        CRON_SECRET=secrets.token_urlsafe(48),
+        MAX_CONTENT_LENGTH=4 * 1024 * 1024,
+        MAX_FILE_SIZE=4 * 1024 * 1024 - 64 * 1024,
+    )
+    monkeypatch.setenv("VERCEL", "1")
+
+    def reject_write(*args, **kwargs):
+        raise AssertionError("A configured Vercel app must not write to its bundle")
+
+    monkeypatch.setattr(Path, "mkdir", reject_write)
+    monkeypatch.setattr(Path, "chmod", reject_write)
+    application = create_app(config)
+    client = application.test_client()
+    base = "https://secure-share.example"
+    assert client.get("/", base_url=base).status_code == 200
+    assert client.get("/static/css/style.css", base_url=base).status_code == 200
+    assert client.get("/api/files", base_url=base).status_code == 401
+    assert client.post("/api/internal/email-worker", base_url=base).status_code == 401

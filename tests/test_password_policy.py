@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+from pathlib import Path
 
 import pytest
 
@@ -12,6 +13,15 @@ from app.services.password_policy import (
     PasswordPolicyConfigurationError,
     validate_password_policy_configuration,
 )
+
+
+def test_shipped_production_corpus_is_valid_and_contains_real_common_passwords(app):
+    path = Path(app.root_path) / "data" / "production-password-blocklist.sha256"
+    app.config.update(APP_ENV="production", PASSWORD_BLOCKLIST_PATH=str(path))
+    validate_password_policy_configuration(app)
+    digests = set(path.read_text(encoding="ascii").splitlines())
+    assert hashlib.sha256(b"123456").hexdigest() in digests
+    assert hashlib.sha256(b"password").hexdigest() in digests
 
 
 def _registration(client, password: str, *, username: str = "alice"):
