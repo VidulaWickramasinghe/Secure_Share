@@ -4,4 +4,4 @@ bandit[toml]>=1.9.4,<2
 detect-secrets>=1.5,<2
 pip-audit>=2.9,<3
 pytest>=9.1.1,<10
-ruff>=0.12,<1
+ruff>=0.16.5,<1
